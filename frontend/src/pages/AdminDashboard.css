@@ -1,0 +1,274 @@
+.admin-dashboard-main {
+  background: #f4f8f4;
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-refresh-button {
+  padding: 13px 20px;
+  border: 1px solid #15803d;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #15803d;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-refresh-button:hover {
+  background: #f0fdf4;
+}
+
+.admin-error-message {
+  margin-bottom: 24px;
+  padding: 14px 18px;
+  border: 1px solid #fecaca;
+  border-radius: 11px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.admin-statistics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 17px;
+  margin-bottom: 27px;
+}
+
+.admin-content-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.admin-panel {
+  padding: 25px;
+  border: 1px solid #e2eae3;
+  border-radius: 19px;
+  background: #ffffff;
+}
+
+.admin-loading-text {
+  color: #66756b;
+  font-size: 14px;
+}
+
+.admin-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table thead th {
+  padding: 13px 12px;
+  border-bottom: 1px solid #e2eae3;
+  color: #66756b;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-table tbody td {
+  padding: 15px 12px;
+  border-bottom: 1px solid #eef3ef;
+  color: #26372c;
+  vertical-align: top;
+}
+
+.admin-table tbody td strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #172218;
+}
+
+.admin-table tbody td span:not(.admin-role-pill) {
+  color: #66756b;
+  font-size: 12px;
+}
+
+.admin-role-pill {
+  display: inline-block;
+  padding: 6px 11px;
+  border-radius: 18px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.admin-role-pill.donor {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.admin-role-pill.ngo {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.admin-role-pill.admin {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.admin-empty-row {
+  color: #66756b;
+  text-align: center;
+}
+
+.admin-donation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 680px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.admin-donation-card {
+  padding: 18px;
+  border: 1px solid #e4ebe5;
+  border-radius: 15px;
+}
+
+.admin-donation-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.admin-donation-top h3 {
+  margin: 0 0 5px;
+  color: #172218;
+  font-size: 18px;
+}
+
+.admin-donation-top p {
+  margin: 0;
+  color: #66756b;
+  font-size: 13px;
+}
+
+.admin-card-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+}
+
+.admin-status-pill {
+  padding: 7px 12px;
+  border-radius: 19px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.admin-status-pill.active {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.admin-status-pill.accepted {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.admin-status-pill.collected {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.admin-donation-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 11px;
+}
+
+.admin-donation-details div {
+  padding: 11px;
+  border-radius: 10px;
+  background: #f7faf7;
+}
+
+.admin-donation-details span {
+  display: block;
+  margin-bottom: 5px;
+  color: #66756b;
+  font-size: 12px;
+}
+
+.admin-donation-details strong {
+  display: block;
+  color: #172218;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.admin-assignment-text {
+  margin: 15px 0 0;
+  color: #5f7065;
+  font-size: 13px;
+}
+
+.admin-empty-state {
+  padding: 34px 18px;
+  border: 1px dashed #d7e2d9;
+  border-radius: 14px;
+  color: #66756b;
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 1280px) {
+  .admin-statistics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .admin-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .admin-header-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-refresh-button,
+  .view-home-button {
+    text-align: center;
+  }
+
+  .admin-statistics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-panel {
+    padding: 18px;
+  }
+
+  .admin-donation-top {
+    flex-direction: column;
+  }
+
+  .admin-card-pills {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
