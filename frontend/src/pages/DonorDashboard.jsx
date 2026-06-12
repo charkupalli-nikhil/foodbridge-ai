@@ -1,217 +1,86 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import API from "../api/axios";
 import "./Dashboard.css";
-
-import { API_BASE_URL } from "../config";
-
-const emptyDonationForm = {
-  foodName: "",
-  category: "",
-  servings: "",
-  preparationTime: "",
-  pickupDeadline: "",
-  location: "",
-  packagingCondition: "",
-};
-
-const emptyStatistics = {
-  activeDonations: 0,
-  acceptedPickups: 0,
-  completedPickups: 0,
-  highPriorityDonations: 0,
-  mealsSaved: 0,
-};
-
-function getStoredUser() {
-  const storedUser = localStorage.getItem("foodbridge_user");
-
-  if (!storedUser) {
-    return {
-      fullName: "Food Donor",
-      organisation: "Registered Food Donor",
-      location: "",
-    };
-  }
-
-  try {
-    return JSON.parse(storedUser);
-  } catch {
-    return {
-      fullName: "Food Donor",
-      organisation: "Registered Food Donor",
-      location: "",
-    };
-  }
-}
-
-function clearSession() {
-  localStorage.removeItem("foodbridge_access_token");
-  localStorage.removeItem("foodbridge_user");
-  localStorage.removeItem("foodbridge_demo_donor");
-  localStorage.removeItem("foodbridge_demo_ngo");
-}
-
-function formatDateTime(value) {
-  return new Date(value).toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function formatAiConfidence(value) {
-  if (value === null || value === undefined || value === "") {
-    return "Not available";
-  }
-
-  const numericValue = Number(value);
-
-  if (Number.isNaN(numericValue)) {
-    return "Not available";
-  }
-
-  if (Number.isInteger(numericValue)) {
-    return `${numericValue}%`;
-  }
-
-  return `${numericValue.toFixed(2)}%`;
-}
-
-function formatPredictionMethod(value) {
-  if (!value) {
-    return "Legacy Record";
-  }
-
-  if (value === "ml_model") {
-    return "ML Model";
-  }
-
-  if (value === "rule_fallback") {
-    return "Rule Fallback";
-  }
-
-  if (value === "rule_fallback_after_ml_error") {
-    return "Fallback After ML Error";
-  }
-
-  return value
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-function getPriorityClass(priority) {
-  if (!priority) {
-    return "medium";
-  }
-
-  return priority.toLowerCase();
-}
-
-function getMinimumDeadline() {
-  const now = new Date();
-  const localTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-
-  return localTime.toISOString().slice(0, 16);
-}
-
-async function readErrorMessage(response) {
-  try {
-    const errorData = await response.json();
-
-    if (typeof errorData.detail === "string") {
-      return errorData.detail;
-    }
-
-    if (Array.isArray(errorData.detail)) {
-      return errorData.detail.map((error) => error.msg).join(" ");
-    }
-
-    return "The request could not be completed.";
-  } catch {
-    return "The request could not be completed.";
-  }
-}
 
 function DonorDashboard() {
   const navigate = useNavigate();
 
-  const [donor] = useState(getStoredUser);
+  const savedUser = JSON.parse(localStorage.getItem("user") || "{}");
+
+  const [statistics, setStatistics] = useState({
+    activeDonations: 0,
+    acceptedPickups: 0,
+    completedPickups: 0,
+    highPriorityDonations: 0,
+    mealsSaved: 0,
+  });
+
   const [donations, setDonations] = useState([]);
-  const [statistics, setStatistics] = useState(emptyStatistics);
-  const [formData, setFormData] = useState(emptyDonationForm);
-  const [successMessage, setSuccessMessage] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const authenticatedRequest = useCallback(
-    async (endpoint, options = {}) => {
-      const token = localStorage.getItem("foodbridge_access_token");
+  const [formData, setFormData] = useState({
+    foodName: "",
+    category: "Cooked Meal",
+    servings: "",
+    preparationTime: "",
+    pickupDeadline: "",
+    location: savedUser.location || "",
+    packagingCondition: "",
+  });
 
-      if (!token) {
-        clearSession();
-        navigate("/login", { replace: true });
-        throw new Error("Please login again to continue.");
-      }
+  const [foodImageFile, setFoodImageFile] = useState(null);
+  const [packagingImageFile, setPackagingImageFile] = useState(null);
+  const [foodImagePreview, setFoodImagePreview] = useState("");
+  const [packagingImagePreview, setPackagingImagePreview] = useState("");
 
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(options.body ? { "Content-Type": "application/json" } : {}),
-          ...options.headers,
-        },
-      });
+  const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
-      if (response.status === 401) {
-        clearSession();
-        navigate("/login", { replace: true });
-        throw new Error("Your login session has expired. Please login again.");
-      }
+  const backendBaseUrl = (
+    API.defaults.baseURL ||
+    import.meta.env.VITE_API_URL ||
+    "http://127.0.0.1:8000/api"
+  ).replace(/\/api\/?$/, "");
 
-      return response;
-    },
-    [navigate]
-  );
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return "";
+    if (imagePath.startsWith("http")) return imagePath;
+    return `${backendBaseUrl}${imagePath}`;
+  };
 
-  const loadDashboardData = useCallback(async () => {
+  const formatDateTime = (dateValue) => {
+    if (!dateValue) return "Not available";
+
+    return new Date(dateValue).toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  };
+
+  const loadDashboardData = async () => {
     try {
-      setIsLoading(true);
-      setErrorMessage("");
+      setPageLoading(true);
 
-      const [donationsResponse, statisticsResponse] = await Promise.all([
-        authenticatedRequest("/donations/my"),
-        authenticatedRequest("/statistics/donor"),
+      const [statisticsResponse, donationsResponse] = await Promise.all([
+        API.get("/statistics/donor"),
+        API.get("/donations/my"),
       ]);
 
-      if (!donationsResponse.ok) {
-        const message = await readErrorMessage(donationsResponse);
-        throw new Error(message);
-      }
-
-      if (!statisticsResponse.ok) {
-        const message = await readErrorMessage(statisticsResponse);
-        throw new Error(message);
-      }
-
-      const donationData = await donationsResponse.json();
-      const statisticsData = await statisticsResponse.json();
-
-      setDonations(donationData);
-      setStatistics(statisticsData);
+      setStatistics(statisticsResponse.data);
+      setDonations(donationsResponse.data);
+      setMessage("");
     } catch (error) {
-      setErrorMessage(
-        error.message ||
-          "Unable to load your donor dashboard from the backend."
-      );
+      console.error(error);
+      setMessage("Unable to load dashboard data. Please login again.");
     } finally {
-      setIsLoading(false);
+      setPageLoading(false);
     }
-  }, [authenticatedRequest]);
+  };
 
   useEffect(() => {
     loadDashboardData();
-  }, [loadDashboardData]);
+  }, []);
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -222,66 +91,157 @@ function DonorDashboard() {
     }));
   };
 
-  const showSuccessMessage = (message) => {
-    setSuccessMessage(message);
+  const handleFoodImageChange = (event) => {
+    const file = event.target.files[0];
 
-    window.setTimeout(() => {
-      setSuccessMessage("");
-    }, 5000);
+    if (!file) {
+      setFoodImageFile(null);
+      setFoodImagePreview("");
+      return;
+    }
+
+    setFoodImageFile(file);
+    setFoodImagePreview(URL.createObjectURL(file));
   };
 
-  const handleDonationSubmit = async (event) => {
+  const handlePackagingImageChange = (event) => {
+    const file = event.target.files[0];
+
+    if (!file) {
+      setPackagingImageFile(null);
+      setPackagingImagePreview("");
+      return;
+    }
+
+    setPackagingImageFile(file);
+    setPackagingImagePreview(URL.createObjectURL(file));
+  };
+
+  const uploadImage = async (file, imageType) => {
+    if (!file) return null;
+
+    const uploadFormData = new FormData();
+    uploadFormData.append("file", file);
+    uploadFormData.append("image_type", imageType);
+
+    const response = await API.post("/upload-image", uploadFormData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+
+    return response.data.imageUrl;
+  };
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
-    try {
-      setIsSubmitting(true);
-      setErrorMessage("");
-      setSuccessMessage("");
+    if (!formData.foodName.trim()) {
+      setMessage("Please enter food name.");
+      return;
+    }
 
-      const response = await authenticatedRequest("/donations", {
-        method: "POST",
-        body: JSON.stringify({
-         ...formData,
-         servings: Number(formData.servings),
-         pickupDeadline: new Date(formData.pickupDeadline).toISOString(),
-         }),
+    if (!formData.servings || Number(formData.servings) <= 0) {
+      setMessage("Please enter valid number of servings.");
+      return;
+    }
+
+    if (!formData.preparationTime.trim()) {
+      setMessage("Please enter preparation time.");
+      return;
+    }
+
+    if (!formData.pickupDeadline) {
+      setMessage("Please select pickup deadline.");
+      return;
+    }
+
+    if (!formData.location.trim()) {
+      setMessage("Please enter pickup location.");
+      return;
+    }
+
+    if (!formData.packagingCondition.trim()) {
+      setMessage("Please enter packaging condition.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setMessage("Uploading images and posting donation...");
+
+      const foodImageUrl = await uploadImage(foodImageFile, "food");
+      const packagingImageUrl = await uploadImage(
+        packagingImageFile,
+        "packaging"
+      );
+
+      const donationPayload = {
+        foodName: formData.foodName.trim(),
+        category: formData.category,
+        servings: Number(formData.servings),
+        preparationTime: formData.preparationTime.trim(),
+        pickupDeadline: new Date(formData.pickupDeadline).toISOString(),
+        location: formData.location.trim(),
+        packagingCondition: formData.packagingCondition.trim(),
+        foodImage: foodImageUrl,
+        packagingImage: packagingImageUrl,
+      };
+
+      await API.post("/donations", donationPayload);
+
+      setMessage("Donation posted successfully with images.");
+
+      setFormData({
+        foodName: "",
+        category: "Cooked Meal",
+        servings: "",
+        preparationTime: "",
+        pickupDeadline: "",
+        location: savedUser.location || "",
+        packagingCondition: "",
       });
 
-      if (!response.ok) {
-        const message = await readErrorMessage(response);
-        throw new Error(message);
-      }
+      setFoodImageFile(null);
+      setPackagingImageFile(null);
+      setFoodImagePreview("");
+      setPackagingImagePreview("");
 
-      const createdDonation = await response.json();
+      const foodInput = document.getElementById("foodImage");
+      const packagingInput = document.getElementById("packagingImage");
 
-      setFormData(emptyDonationForm);
-
-      showSuccessMessage(
-        `Donation posted successfully. AI assigned ${
-          createdDonation.priority
-        } priority with ${formatAiConfidence(
-          createdDonation.aiConfidence
-        )} confidence.`
-      );
+      if (foodInput) foodInput.value = "";
+      if (packagingInput) packagingInput.value = "";
 
       await loadDashboardData();
     } catch (error) {
-      setErrorMessage(error.message || "Unable to post your donation.");
+      console.error(error);
+
+      const errorMessage =
+        error.response?.data?.detail ||
+        "Unable to post donation. Please check backend and try again.";
+
+      setMessage(errorMessage);
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    clearSession();
+  const handleLogout = (event) => {
+    event.preventDefault();
+
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    navigate("/login");
   };
 
   return (
     <div className="dashboard-page">
       <aside className="dashboard-sidebar">
         <Link to="/" className="dashboard-brand">
-          <span>🍃</span>
-
+          <span>🥗</span>
           <div>
             <h2>FoodBridge AI</h2>
             <p>Donor Portal</p>
@@ -289,151 +249,142 @@ function DonorDashboard() {
         </Link>
 
         <nav className="dashboard-navigation">
-          <a className="active-dashboard-link" href="#overview">
-            <span>▦</span> Overview
+          <a href="#overview" className="active-dashboard-link">
+            <span>▦</span>
+            Overview
           </a>
 
-          <a href="#add-donation">
-            <span>＋</span> Add Donation
+          <a href="#post-donation">
+            <span>🍱</span>
+            Post Donation
           </a>
 
           <a href="#my-donations">
-            <span>🍱</span> My Donations
+            <span>📦</span>
+            My Donations
           </a>
         </nav>
 
         <div className="safety-note">
-          <h3>AI Priority Reminder</h3>
+          <h3>Food Safety Reminder</h3>
           <p>
-            FoodBridge AI predicts pickup priority using donation details.
-            Food safety verification must still be completed by the responsible
-            organisations.
+            Upload clear food and packaging images. Mention correct preparation
+            time, pickup deadline and packaging condition before posting surplus
+            food.
           </p>
         </div>
 
-        <Link to="/login" className="logout-link" onClick={handleLogout}>
+        <a href="#logout" className="logout-link" onClick={handleLogout}>
           ← Logout
-        </Link>
+        </a>
       </aside>
 
       <main className="dashboard-main">
-        <header className="dashboard-header" id="overview">
+        <section className="dashboard-header" id="overview">
           <div>
             <p className="dashboard-label">DONOR DASHBOARD</p>
-            <h1>Welcome, {donor.fullName}</h1>
+            <h1>
+              Welcome, {savedUser.fullName || savedUser.name || "Food Donor"}
+            </h1>
             <span>
-              {donor.organisation}
-              {donor.location ? ` • ${donor.location}` : ""}
+              {savedUser.organisation || "Registered Donor"} •{" "}
+              {savedUser.location || "Food Donation Location"}
             </span>
           </div>
 
-          <Link to="/" className="view-home-button">
-            View Homepage
-          </Link>
-        </header>
+          <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
+            <button className="view-home-button" onClick={loadDashboardData}>
+              Refresh Donations
+            </button>
 
-        <section className="demo-information">
-          <strong>Secure account connected:</strong> Your donations are stored
-          in MongoDB and protected through your authenticated donor account. New
-          food listings are analysed by the AI priority prediction model.
+            <Link to="/" className="view-home-button">
+              View Homepage
+            </Link>
+          </div>
         </section>
 
-        {errorMessage && (
-          <div
-            style={{
-              marginBottom: "22px",
-              padding: "14px 17px",
-              borderRadius: "10px",
-              background: "#fee2e2",
-              border: "1px solid #fecaca",
-              color: "#b91c1c",
-              fontWeight: "600",
-              fontSize: "14px",
-              lineHeight: "1.5",
-            }}
-          >
-            {errorMessage}
-          </div>
-        )}
+        <div className="demo-information">
+          <strong>Secure donor workflow connected:</strong> Your donations are
+          saved in MongoDB using your authenticated donor account. New listings
+          include AI priority prediction, confidence information and uploaded
+          food images.
+        </div>
 
         <section className="dashboard-statistics">
-          <article className="statistic-card">
+          <div className="statistic-card">
             <div className="stat-icon green">🍱</div>
-
             <div>
               <p>Active Donations</p>
               <h2>{statistics.activeDonations}</h2>
             </div>
-          </article>
+          </div>
 
-          <article className="statistic-card">
-            <div className="stat-icon red">🚚</div>
-
+          <div className="statistic-card">
+            <div className="stat-icon orange">🤝</div>
             <div>
               <p>Accepted Pickups</p>
               <h2>{statistics.acceptedPickups}</h2>
             </div>
-          </article>
+          </div>
 
-          <article className="statistic-card">
-            <div className="stat-icon blue">✓</div>
-
+          <div className="statistic-card">
+            <div className="stat-icon blue">🚚</div>
             <div>
               <p>Completed Pickups</p>
               <h2>{statistics.completedPickups}</h2>
             </div>
-          </article>
+          </div>
 
-          <article className="statistic-card">
-            <div className="stat-icon orange">🍽️</div>
+          <div className="statistic-card">
+            <div className="stat-icon red">⚡</div>
+            <div>
+              <p>High Priority</p>
+              <h2>{statistics.highPriorityDonations}</h2>
+            </div>
+          </div>
 
+          <div className="statistic-card">
+            <div className="stat-icon green">🍽️</div>
             <div>
               <p>Meals Saved</p>
               <h2>{statistics.mealsSaved}</h2>
             </div>
-          </article>
+          </div>
         </section>
 
         <section className="dashboard-content-grid">
-          <article className="donation-form-container" id="add-donation">
+          <div className="donation-form-container" id="post-donation">
             <div className="dashboard-section-title">
               <div>
-                <p>AI-ASSISTED LISTING</p>
-                <h2>Add Food Donation</h2>
+                <p>CREATE DONATION</p>
+                <h2>Post New Food Donation</h2>
               </div>
             </div>
 
-            {successMessage && (
-              <div className="success-message">{successMessage}</div>
-            )}
+            {message && <div className="success-message">{message}</div>}
 
-            <form className="donation-form" onSubmit={handleDonationSubmit}>
+            <form className="donation-form" onSubmit={handleSubmit}>
               <div className="donation-form-row">
-                <label htmlFor="food-name">
+                <label>
                   Food Name
                   <input
-                    id="food-name"
-                    name="foodName"
                     type="text"
-                    placeholder="Example: Veg Biryani"
+                    name="foodName"
                     value={formData.foodName}
                     onChange={handleInputChange}
+                    placeholder="Example: Veg Biryani"
                     required
                   />
                 </label>
 
-                <label htmlFor="food-category">
+                <label>
                   Food Category
                   <select
-                    id="food-category"
                     name="category"
                     value={formData.category}
                     onChange={handleInputChange}
                     required
                   >
-                    <option value="" disabled>
-                      Select category
-                    </option>
                     <option value="Cooked Meal">Cooked Meal</option>
                     <option value="Packaged Food">Packaged Food</option>
                     <option value="Bakery">Bakery</option>
@@ -446,110 +397,140 @@ function DonorDashboard() {
               </div>
 
               <div className="donation-form-row">
-                <label htmlFor="servings">
-                  Number of Servings
+                <label>
+                  Servings
                   <input
-                    id="servings"
-                    name="servings"
                     type="number"
-                    min="1"
-                    placeholder="Example: 60"
+                    name="servings"
                     value={formData.servings}
                     onChange={handleInputChange}
+                    placeholder="Example: 50"
+                    min="1"
                     required
                   />
                 </label>
 
-                <label htmlFor="preparation-time">
+                <label>
                   Preparation Time
                   <input
-                    id="preparation-time"
-                    name="preparationTime"
                     type="text"
-                    placeholder="Prepared 20 minutes ago"
+                    name="preparationTime"
                     value={formData.preparationTime}
                     onChange={handleInputChange}
+                    placeholder="Example: Prepared 1 hour ago"
                     required
                   />
                 </label>
               </div>
 
-              <label htmlFor="pickup-deadline">
+              <label>
                 Pickup Deadline
                 <input
-                  id="pickup-deadline"
-                  name="pickupDeadline"
                   type="datetime-local"
-                  min={getMinimumDeadline()}
+                  name="pickupDeadline"
                   value={formData.pickupDeadline}
                   onChange={handleInputChange}
                   required
                 />
               </label>
 
-              <label htmlFor="pickup-location">
+              <label>
                 Pickup Location
                 <input
-                  id="pickup-location"
-                  name="location"
                   type="text"
-                  placeholder="Example: WIT College Canteen, Solapur"
+                  name="location"
                   value={formData.location}
                   onChange={handleInputChange}
+                  placeholder="Example: Solapur, Maharashtra"
                   required
                 />
               </label>
 
-              <label htmlFor="packaging-condition">
+              <label>
                 Packaging Condition
                 <textarea
-                  id="packaging-condition"
                   name="packagingCondition"
-                  placeholder="Example: Packed in clean covered containers"
                   value={formData.packagingCondition}
                   onChange={handleInputChange}
-                  rows="3"
+                  placeholder="Example: Packed in clean covered containers"
                   required
                 />
               </label>
+
+              <div className="donation-form-row">
+                <label>
+                  Food Image
+                  <input
+                    id="foodImage"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFoodImageChange}
+                  />
+
+                  {foodImagePreview && (
+                    <img
+                      className="donation-image-preview"
+                      src={foodImagePreview}
+                      alt="Food preview"
+                    />
+                  )}
+                </label>
+
+                <label>
+                  Packaging Image
+                  <input
+                    id="packagingImage"
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePackagingImageChange}
+                  />
+
+                  {packagingImagePreview && (
+                    <img
+                      className="donation-image-preview"
+                      src={packagingImagePreview}
+                      alt="Packaging preview"
+                    />
+                  )}
+                </label>
+              </div>
 
               <button
                 className="post-donation-button"
                 type="submit"
-                disabled={isSubmitting}
+                disabled={loading}
               >
-                {isSubmitting
-                  ? "Running AI Prediction..."
-                  : "Post Food Donation"}
+                {loading ? "Posting Donation..." : "Post Donation"}
               </button>
             </form>
-          </article>
+          </div>
 
-          <article className="donation-list-container" id="my-donations">
+          <div className="donation-list-container" id="my-donations">
             <div className="dashboard-section-title">
               <div>
-                <p>YOUR AI-TRACKED ACTIVITY</p>
+                <p>DONATION HISTORY</p>
                 <h2>My Donations</h2>
               </div>
 
               <span className="listing-count">
-                {donations.length} Listings
+                {donations.length} {donations.length === 1 ? "Item" : "Items"}
               </span>
             </div>
 
-            {isLoading ? (
-              <p>Loading your donations...</p>
+            {pageLoading ? (
+              <div className="empty-state">
+                <h3>Loading donations...</h3>
+                <p>Please wait while your donation records are loaded.</p>
+              </div>
+            ) : donations.length === 0 ? (
+              <div className="empty-state">
+                <h3>No donations posted yet</h3>
+                <p>Your posted food donations will appear here.</p>
+              </div>
             ) : (
               <div className="donation-list">
-                {donations.length === 0 && (
-                  <p>
-                    You have not posted any secure donations yet. Add your
-                    first food listing using the form.
-                  </p>
-                )}
-
                 {donations.map((donation) => (
-                  <article className="donation-record" key={donation.id}>
+                  <div className="donation-record" key={donation.id}>
                     <div className="record-top">
                       <div>
                         <h3>{donation.foodName}</h3>
@@ -557,13 +538,37 @@ function DonorDashboard() {
                       </div>
 
                       <span
-                        className={`priority-pill ${getPriorityClass(
-                          donation.priority
-                        )}`}
+                        className={`priority-pill ${donation.priority?.toLowerCase()}`}
                       >
-                        AI Priority: {donation.priority || "Medium"}
+                        AI Priority: {donation.priority}
                       </span>
                     </div>
+
+                    {(donation.foodImage || donation.packagingImage) && (
+                      <div className="donation-images">
+                        {donation.foodImage && (
+                          <div>
+                            <p className="image-label">Food Image</p>
+                            <img
+                              className="donation-image"
+                              src={getImageUrl(donation.foodImage)}
+                              alt={donation.foodName}
+                            />
+                          </div>
+                        )}
+
+                        {donation.packagingImage && (
+                          <div>
+                            <p className="image-label">Packaging Image</p>
+                            <img
+                              className="donation-image"
+                              src={getImageUrl(donation.packagingImage)}
+                              alt="Packaging"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="record-information">
                       <div>
@@ -575,9 +580,9 @@ function DonorDashboard() {
                         <span>Status</span>
                         <strong
                           className={
-                            donation.status === "Active"
-                              ? "active-status"
-                              : "collected-status"
+                            donation.status === "Collected"
+                              ? "collected-status"
+                              : "active-status"
                           }
                         >
                           {donation.status}
@@ -587,61 +592,46 @@ function DonorDashboard() {
                       <div>
                         <span>AI Confidence</span>
                         <strong>
-                          {formatAiConfidence(donation.aiConfidence)}
+                          {donation.aiConfidence !== null &&
+                          donation.aiConfidence !== undefined
+                            ? `${donation.aiConfidence}%`
+                            : "Not available"}
                         </strong>
                       </div>
 
                       <div>
-                        <span>Prediction Method</span>
+                        <span>Prediction</span>
                         <strong>
-                          {formatPredictionMethod(donation.predictionMethod)}
+                          {donation.predictionMethod || "rule_fallback"}
                         </strong>
                       </div>
                     </div>
 
-                    <p className="record-location">📍 {donation.location}</p>
-
-                    <p className="record-deadline">
-                      Pickup deadline: {formatDateTime(donation.pickupDeadline)}
+                    <p className="record-location">
+                      📍 <strong>Location:</strong> {donation.location}
                     </p>
 
-                    {donation.predictionFeatures && (
-                      <p className="record-deadline">
-                        ML features used:{" "}
-                        {donation.predictionFeatures.preparation_age_minutes ??
-                          "N/A"}{" "}
-                        min prepared age •{" "}
-                        {donation.predictionFeatures.pickup_window_minutes ??
-                          "N/A"}{" "}
-                        min pickup window • Packaging score{" "}
-                        {donation.predictionFeatures.packaging_score ?? "N/A"}
-                      </p>
-                    )}
+                    <p className="record-deadline">
+                      ⏰ <strong>Pickup Deadline:</strong>{" "}
+                      {formatDateTime(donation.pickupDeadline)}
+                    </p>
 
-                    {donation.status === "Active" && (
-                      <p className="record-deadline">
-                        Waiting for an NGO partner to accept this request.
-                      </p>
-                    )}
+                    <p className="record-deadline">
+                      📦 <strong>Packaging:</strong>{" "}
+                      {donation.packagingCondition}
+                    </p>
 
-                    {donation.status === "Accepted" && (
-                      <p className="record-deadline">
-                        Accepted by:{" "}
-                        {donation.acceptedByOrganisation || "NGO Partner"}
+                    {donation.acceptedByOrganisation && (
+                      <p className="record-location">
+                        🤝 <strong>Accepted By:</strong>{" "}
+                        {donation.acceptedByOrganisation}
                       </p>
                     )}
-
-                    {donation.status === "Collected" && (
-                      <p className="record-deadline">
-                        Collection completed by:{" "}
-                        {donation.acceptedByOrganisation || "NGO Partner"}
-                      </p>
-                    )}
-                  </article>
+                  </div>
                 ))}
               </div>
             )}
-          </article>
+          </div>
         </section>
       </main>
     </div>

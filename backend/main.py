@@ -1,20 +1,25 @@
-import os
 import uuid
-
-from fastapi import UploadFile, File
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from bson import ObjectId
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
-from fastapi.staticfiles import StaticFiles
 
 from database import (
     check_database_connection,
@@ -34,6 +39,7 @@ PriorityType = Literal["High", "Medium", "Low"]
 DonationStatusType = Literal["Active", "Accepted", "Collected"]
 UserRoleType = Literal["donor", "ngo", "admin"]
 RegistrationRoleType = Literal["donor", "ngo"]
+
 FoodCategoryType = Literal[
     "Cooked Meal",
     "Packaged Food",
@@ -87,6 +93,7 @@ class DonationCreate(BaseModel):
     pickupDeadline: datetime
     location: str = Field(min_length=2, max_length=200)
     packagingCondition: str = Field(min_length=2, max_length=300)
+
     foodImage: str | None = None
     packagingImage: str | None = None
 
@@ -100,6 +107,10 @@ class Donation(BaseModel):
     pickupDeadline: datetime
     location: str
     packagingCondition: str
+
+    foodImage: str | None = None
+    packagingImage: str | None = None
+
     donorName: str
     donorOrganisation: str
     priority: PriorityType
@@ -157,14 +168,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-os.makedirs("uploads/food", exist_ok=True)
-os.makedirs("uploads/packaging", exist_ok=True)
+
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+FOOD_UPLOAD_DIR = UPLOAD_DIR / "food"
+PACKAGING_UPLOAD_DIR = UPLOAD_DIR / "packaging"
+
+FOOD_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+PACKAGING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount(
     "/uploads",
-    StaticFiles(directory="uploads"),
+    StaticFiles(directory=str(UPLOAD_DIR)),
     name="uploads",
 )
+
+
 allowed_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -225,6 +244,8 @@ def document_to_donation(document: dict) -> Donation:
         pickupDeadline=document["pickupDeadline"],
         location=document["location"],
         packagingCondition=document["packagingCondition"],
+        foodImage=document.get("foodImage"),
+        packagingImage=document.get("packagingImage"),
         donorName=document.get("donorName", "Food Donor"),
         donorOrganisation=document.get(
             "donorOrganisation",
@@ -259,16 +280,6 @@ def calculate_priority(category: str, pickup_deadline: datetime) -> PriorityType
 
 
 def generate_ai_priority_payload(donation_data: DonationCreate) -> dict[str, Any]:
-    """
-    Uses the trained ML model to predict donation priority.
-
-    Stored fields:
-    - priority: High / Medium / Low
-    - aiConfidence: confidence percentage
-    - predictionMethod: ml_model / rule_fallback
-    - predictionFeatures: feature values used by the model
-    """
-
     try:
         prediction_result = predict_food_priority(
             category=donation_data.category,
@@ -389,6 +400,7 @@ def read_root():
         "message": "Backend server is running successfully.",
         "version": "1.1.0",
         "aiPriorityPrediction": "enabled",
+        "imageUpload": "enabled",
     }
 
 
@@ -401,6 +413,68 @@ def health_check():
         "service": "FoodBridge AI Backend",
         "database": "connected" if database_connected else "not connected",
         "aiPriorityPrediction": "enabled",
+        "imageUpload": "enabled",
+    }
+
+
+@app.post("/api/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    image_type: str = Form("food"),
+):
+    if image_type not in ["food", "packaging"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image type. Use food or packaging.",
+        )
+
+    allowed_content_types = {
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+    }
+
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only JPG, JPEG, PNG and WEBP image files are allowed.",
+        )
+
+    original_filename = file.filename or ""
+    extension = original_filename.split(".")[-1].lower()
+
+    if extension not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image extension. Use jpg, jpeg, png or webp.",
+        )
+
+    file_content = await file.read()
+
+    max_file_size = 5 * 1024 * 1024
+
+    if len(file_content) > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image size must be less than 5 MB.",
+        )
+
+    filename = f"{uuid.uuid4()}.{extension}"
+
+    if image_type == "food":
+        save_path = FOOD_UPLOAD_DIR / filename
+        image_url = f"/uploads/food/{filename}"
+    else:
+        save_path = PACKAGING_UPLOAD_DIR / filename
+        image_url = f"/uploads/packaging/{filename}"
+
+    with open(save_path, "wb") as buffer:
+        buffer.write(file_content)
+
+    return {
+        "message": "Image uploaded successfully.",
+        "imageUrl": image_url,
     }
 
 
@@ -581,30 +655,6 @@ def get_my_pickups(
 
 
 @app.post(
-    @app.post("/api/upload-image")
-async def upload_image(
-    file: UploadFile = File(...),
-    image_type: str = "food",
-):
-    if image_type not in ["food", "packaging"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid image type",
-        )
-
-    extension = file.filename.split(".")[-1]
-
-    filename = f"{uuid.uuid4()}.{extension}"
-
-    save_folder = f"uploads/{image_type}"
-    save_path = f"{save_folder}/{filename}"
-
-    with open(save_path, "wb") as buffer:
-        buffer.write(await file.read())
-
-    return {
-        "imageUrl": f"/uploads/{image_type}/{filename}"
-    }
     "/api/donations",
     response_model=Donation,
     status_code=status.HTTP_201_CREATED,
@@ -933,6 +983,7 @@ def get_admin_statistics(
         total_donors = users_collection.count_documents({"role": "donor"})
         total_ngos = users_collection.count_documents({"role": "ngo"})
         total_donations = donations_collection.count_documents({})
+
         active_donations = donations_collection.count_documents(
             {"status": "Active"}
         )

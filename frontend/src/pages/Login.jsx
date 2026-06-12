@@ -13,9 +13,7 @@ async function getApiErrorMessage(response) {
     }
 
     if (Array.isArray(errorData.detail)) {
-      return errorData.detail
-        .map((errorItem) => errorItem.msg)
-        .join(" ");
+      return errorData.detail.map((errorItem) => errorItem.msg).join(" ");
     }
 
     return "Unable to login to your account.";
@@ -25,21 +23,23 @@ async function getApiErrorMessage(response) {
 }
 
 function saveAuthenticatedSession(authData) {
+  localStorage.setItem("accessToken", authData.accessToken);
+  localStorage.setItem("token", authData.accessToken);
+  localStorage.setItem("user", JSON.stringify(authData.user));
+
   localStorage.setItem("foodbridge_access_token", authData.accessToken);
   localStorage.setItem("foodbridge_user", JSON.stringify(authData.user));
 
   if (authData.user.role === "donor") {
-    localStorage.setItem(
-      "foodbridge_demo_donor",
-      JSON.stringify(authData.user)
-    );
+    localStorage.setItem("foodbridge_demo_donor", JSON.stringify(authData.user));
   }
 
   if (authData.user.role === "ngo") {
-    localStorage.setItem(
-      "foodbridge_demo_ngo",
-      JSON.stringify(authData.user)
-    );
+    localStorage.setItem("foodbridge_demo_ngo", JSON.stringify(authData.user));
+  }
+
+  if (authData.user.role === "admin") {
+    localStorage.setItem("foodbridge_demo_admin", JSON.stringify(authData.user));
   }
 }
 
@@ -68,6 +68,11 @@ function Login() {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
+    if (!formData.role) {
+      setErrorMessage("Please select your login role.");
+      return;
+    }
+
     try {
       setErrorMessage("");
       setIsSubmitting(true);
@@ -78,7 +83,7 @@ function Login() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email: formData.email,
+          email: formData.email.trim(),
           password: formData.password,
           role: formData.role,
         }),
@@ -105,7 +110,10 @@ function Login() {
 
       if (authData.user.role === "admin") {
         navigate("/admin-dashboard");
+        return;
       }
+
+      navigate("/");
     } catch (error) {
       setErrorMessage(error.message || "Unable to login to your account.");
     } finally {
