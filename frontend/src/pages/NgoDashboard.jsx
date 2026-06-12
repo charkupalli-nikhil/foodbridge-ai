@@ -14,7 +14,8 @@ const emptyStatistics = {
 };
 
 function getStoredUser() {
-  const storedUser = localStorage.getItem("foodbridge_user");
+  const storedUser =
+    localStorage.getItem("user") || localStorage.getItem("foodbridge_user");
 
   if (!storedUser) {
     return {
@@ -36,13 +37,22 @@ function getStoredUser() {
 }
 
 function clearSession() {
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+
   localStorage.removeItem("foodbridge_access_token");
   localStorage.removeItem("foodbridge_user");
   localStorage.removeItem("foodbridge_demo_donor");
   localStorage.removeItem("foodbridge_demo_ngo");
+  localStorage.removeItem("foodbridge_demo_admin");
 }
 
 function formatDateTime(value) {
+  if (!value) {
+    return "Not available";
+  }
+
   return new Date(value).toLocaleString("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -98,6 +108,54 @@ function getPriorityClass(priority) {
   return priority.toLowerCase();
 }
 
+function getBackendBaseUrl() {
+  return API_BASE_URL.replace(/\/api\/?$/, "");
+}
+
+function getImageUrl(imagePath) {
+  if (!imagePath) {
+    return "";
+  }
+
+  if (imagePath.startsWith("http")) {
+    return imagePath;
+  }
+
+  return `${getBackendBaseUrl()}${imagePath}`;
+}
+
+function DonationImages({ donation }) {
+  if (!donation.foodImage && !donation.packagingImage) {
+    return null;
+  }
+
+  return (
+    <div className="donation-images">
+      {donation.foodImage && (
+        <div>
+          <p className="image-label">Food Image</p>
+          <img
+            className="donation-image"
+            src={getImageUrl(donation.foodImage)}
+            alt={donation.foodName}
+          />
+        </div>
+      )}
+
+      {donation.packagingImage && (
+        <div>
+          <p className="image-label">Packaging Image</p>
+          <img
+            className="donation-image"
+            src={getImageUrl(donation.packagingImage)}
+            alt="Packaging"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 async function readErrorMessage(response) {
   try {
     const errorData = await response.json();
@@ -130,7 +188,10 @@ function NgoDashboard() {
 
   const authenticatedRequest = useCallback(
     async (endpoint, options = {}) => {
-      const token = localStorage.getItem("foodbridge_access_token");
+      const token =
+        localStorage.getItem("accessToken") ||
+        localStorage.getItem("token") ||
+        localStorage.getItem("foodbridge_access_token");
 
       if (!token) {
         clearSession();
@@ -302,8 +363,8 @@ function NgoDashboard() {
         <div className="safety-note">
           <h3>AI Priority Support</h3>
           <p>
-            FoodBridge AI predicts pickup priority using donation details.
-            Your organisation must still verify food condition and safe handling
+            FoodBridge AI predicts pickup priority using donation details. Your
+            organisation must still verify food condition and safe handling
             before distribution.
           </p>
         </div>
@@ -341,18 +402,16 @@ function NgoDashboard() {
 
         <section className="demo-information">
           <strong>Secure NGO workflow connected:</strong> Available donations
-          and assigned pickups are read from MongoDB using your authenticated
-          NGO account. New listings include AI priority prediction and
-          confidence information.
+          and assigned pickups are read from MongoDB using your authenticated NGO
+          account. New listings include AI priority prediction, confidence
+          information, food images and packaging images.
         </section>
 
         {successMessage && (
           <div className="ngo-success-message">{successMessage}</div>
         )}
 
-        {errorMessage && (
-          <div className="ngo-error-message">{errorMessage}</div>
-        )}
+        {errorMessage && <div className="ngo-error-message">{errorMessage}</div>}
 
         <section className="dashboard-statistics">
           <article className="statistic-card">
@@ -437,6 +496,8 @@ function NgoDashboard() {
                       </span>
                     </div>
 
+                    <DonationImages donation={donation} />
+
                     <div className="ngo-donation-details">
                       <div>
                         <span>Servings</span>
@@ -511,18 +572,14 @@ function NgoDashboard() {
                 <h2>My Pickups</h2>
               </div>
 
-              <span className="listing-count">
-                {myPickups.length} Requests
-              </span>
+              <span className="listing-count">{myPickups.length} Requests</span>
             </div>
 
             <div className="ngo-donation-list">
               {myPickups.length === 0 && !isLoading && (
                 <div className="ngo-empty-state">
                   <h3>No assigned pickups</h3>
-                  <p>
-                    Accept an available food donation to begin collection.
-                  </p>
+                  <p>Accept an available food donation to begin collection.</p>
                 </div>
               )}
 
@@ -541,6 +598,8 @@ function NgoDashboard() {
                     </span>
                   </div>
 
+                  <DonationImages donation={donation} />
+
                   <div className="ngo-donation-details">
                     <div>
                       <span>Servings</span>
@@ -554,9 +613,7 @@ function NgoDashboard() {
 
                     <div>
                       <span>AI Confidence</span>
-                      <strong>
-                        {formatAiConfidence(donation.aiConfidence)}
-                      </strong>
+                      <strong>{formatAiConfidence(donation.aiConfidence)}</strong>
                     </div>
 
                     <div>
@@ -568,6 +625,14 @@ function NgoDashboard() {
                   </div>
 
                   <p className="ngo-location">📍 {donation.location}</p>
+
+                  <p className="ngo-deadline">
+                    Pickup before: {formatDateTime(donation.pickupDeadline)}
+                  </p>
+
+                  <p className="ngo-packaging">
+                    <strong>Packaging:</strong> {donation.packagingCondition}
+                  </p>
 
                   {donation.predictionFeatures && (
                     <p className="ngo-deadline">

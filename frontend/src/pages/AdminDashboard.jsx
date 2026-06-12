@@ -17,7 +17,8 @@ const emptyStatistics = {
 };
 
 function getStoredAdmin() {
-  const storedUser = localStorage.getItem("foodbridge_user");
+  const storedUser =
+    localStorage.getItem("user") || localStorage.getItem("foodbridge_user");
 
   if (!storedUser) {
     return {
@@ -39,13 +40,22 @@ function getStoredAdmin() {
 }
 
 function clearSession() {
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+
   localStorage.removeItem("foodbridge_access_token");
   localStorage.removeItem("foodbridge_user");
   localStorage.removeItem("foodbridge_demo_donor");
   localStorage.removeItem("foodbridge_demo_ngo");
+  localStorage.removeItem("foodbridge_demo_admin");
 }
 
 function formatDateTime(value) {
+  if (!value) {
+    return "Not available";
+  }
+
   return new Date(value).toLocaleString("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -101,6 +111,54 @@ function getPriorityClass(priority) {
   return priority.toLowerCase();
 }
 
+function getBackendBaseUrl() {
+  return API_BASE_URL.replace(/\/api\/?$/, "");
+}
+
+function getImageUrl(imagePath) {
+  if (!imagePath) {
+    return "";
+  }
+
+  if (imagePath.startsWith("http")) {
+    return imagePath;
+  }
+
+  return `${getBackendBaseUrl()}${imagePath}`;
+}
+
+function DonationImages({ donation }) {
+  if (!donation.foodImage && !donation.packagingImage) {
+    return null;
+  }
+
+  return (
+    <div className="donation-images">
+      {donation.foodImage && (
+        <div>
+          <p className="image-label">Food Image</p>
+          <img
+            className="donation-image"
+            src={getImageUrl(donation.foodImage)}
+            alt={donation.foodName}
+          />
+        </div>
+      )}
+
+      {donation.packagingImage && (
+        <div>
+          <p className="image-label">Packaging Image</p>
+          <img
+            className="donation-image"
+            src={getImageUrl(donation.packagingImage)}
+            alt="Packaging"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 async function readErrorMessage(response) {
   try {
     const errorData = await response.json();
@@ -131,7 +189,10 @@ function AdminDashboard() {
 
   const authenticatedRequest = useCallback(
     async (endpoint) => {
-      const token = localStorage.getItem("foodbridge_access_token");
+      const token =
+        localStorage.getItem("accessToken") ||
+        localStorage.getItem("token") ||
+        localStorage.getItem("foodbridge_access_token");
 
       if (!token) {
         clearSession();
@@ -237,8 +298,8 @@ function AdminDashboard() {
           <h3>Platform Monitoring</h3>
           <p>
             Monitor registered organisations, donation workflows, AI priority
-            predictions and recovered meal impact across the FoodBridge
-            platform.
+            predictions, uploaded food images and recovered meal impact across
+            the FoodBridge platform.
           </p>
         </div>
 
@@ -275,9 +336,10 @@ function AdminDashboard() {
 
         <section className="demo-information">
           <strong>Secure admin access:</strong> Platform information is loaded
-          from MongoDB through administrator-only API endpoints protected by
-          your authenticated login token. New donation records now include
-          machine-learning priority prediction details.
+          from MongoDB through administrator-only API endpoints protected by your
+          authenticated login token. Donation records include uploaded food
+          images, packaging images and machine-learning priority prediction
+          details.
         </section>
 
         {errorMessage && (
@@ -287,6 +349,7 @@ function AdminDashboard() {
         <section className="admin-statistics-grid">
           <article className="statistic-card">
             <div className="stat-icon green">👥</div>
+
             <div>
               <p>Total Users</p>
               <h2>{statistics.totalUsers}</h2>
@@ -295,6 +358,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon blue">🏪</div>
+
             <div>
               <p>Food Donors</p>
               <h2>{statistics.totalDonors}</h2>
@@ -303,6 +367,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon green">🤝</div>
+
             <div>
               <p>NGO Partners</p>
               <h2>{statistics.totalNgos}</h2>
@@ -311,6 +376,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon orange">🍱</div>
+
             <div>
               <p>Total Donations</p>
               <h2>{statistics.totalDonations}</h2>
@@ -319,6 +385,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon green">📍</div>
+
             <div>
               <p>Active Donations</p>
               <h2>{statistics.activeDonations}</h2>
@@ -327,6 +394,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon red">🚚</div>
+
             <div>
               <p>Accepted Pickups</p>
               <h2>{statistics.acceptedPickups}</h2>
@@ -335,6 +403,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon blue">✓</div>
+
             <div>
               <p>Completed Pickups</p>
               <h2>{statistics.completedPickups}</h2>
@@ -343,6 +412,7 @@ function AdminDashboard() {
 
           <article className="statistic-card">
             <div className="stat-icon orange">🍽️</div>
+
             <div>
               <p>Meals Recovered</p>
               <h2>{statistics.totalMealsRecovered}</h2>
@@ -422,9 +492,7 @@ function AdminDashboard() {
             </div>
 
             {isLoading ? (
-              <p className="admin-loading-text">
-                Loading donation activity...
-              </p>
+              <p className="admin-loading-text">Loading donation activity...</p>
             ) : (
               <div className="admin-donation-list">
                 {donations.length === 0 && (
@@ -460,6 +528,8 @@ function AdminDashboard() {
                       </div>
                     </div>
 
+                    <DonationImages donation={donation} />
+
                     <div className="admin-donation-details">
                       <div>
                         <span>Servings</span>
@@ -482,6 +552,18 @@ function AdminDashboard() {
                       </div>
 
                       <div>
+                        <span>Pickup Deadline</span>
+                        <strong>
+                          {formatDateTime(donation.pickupDeadline)}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Packaging</span>
+                        <strong>{donation.packagingCondition}</strong>
+                      </div>
+
+                      <div>
                         <span>AI Confidence</span>
                         <strong>
                           {formatAiConfidence(donation.aiConfidence)}
@@ -500,11 +582,11 @@ function AdminDashboard() {
                       <p className="admin-assignment-text">
                         ML Features:{" "}
                         <strong>
-                          {donation.predictionFeatures.preparation_age_minutes ??
-                            "N/A"}{" "}
+                          {donation.predictionFeatures
+                            .preparation_age_minutes ?? "N/A"}{" "}
                           min prepared age •{" "}
-                          {donation.predictionFeatures.pickup_window_minutes ??
-                            "N/A"}{" "}
+                          {donation.predictionFeatures
+                            .pickup_window_minutes ?? "N/A"}{" "}
                           min pickup window • Packaging score{" "}
                           {donation.predictionFeatures.packaging_score ?? "N/A"}
                         </strong>
