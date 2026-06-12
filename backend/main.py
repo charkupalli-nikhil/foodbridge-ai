@@ -93,7 +93,6 @@ class DonationCreate(BaseModel):
     pickupDeadline: datetime
     location: str = Field(min_length=2, max_length=200)
     packagingCondition: str = Field(min_length=2, max_length=300)
-
     foodImage: str | None = None
     packagingImage: str | None = None
 
@@ -107,20 +106,16 @@ class Donation(BaseModel):
     pickupDeadline: datetime
     location: str
     packagingCondition: str
-
     foodImage: str | None = None
     packagingImage: str | None = None
-
     donorName: str
     donorOrganisation: str
     priority: PriorityType
     status: DonationStatusType
     createdAt: datetime
-
     aiConfidence: float | None = None
     predictionMethod: str | None = None
     predictionFeatures: dict[str, Any] | None = None
-
     acceptedByName: str | None = None
     acceptedByOrganisation: str | None = None
     acceptedByLocation: str | None = None
@@ -169,7 +164,11 @@ app = FastAPI(
 )
 
 
+# -----------------------------
+# Upload folder setup
+# -----------------------------
 BASE_DIR = Path(__file__).resolve().parent
+
 UPLOAD_DIR = BASE_DIR / "uploads"
 FOOD_UPLOAD_DIR = UPLOAD_DIR / "food"
 PACKAGING_UPLOAD_DIR = UPLOAD_DIR / "packaging"
@@ -184,6 +183,9 @@ app.mount(
 )
 
 
+# -----------------------------
+# CORS setup for local + Render deployment
+# -----------------------------
 allowed_origins = ["*"]
 
 app.add_middleware(
@@ -193,6 +195,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.options("/{full_path:path}")
+async def preflight_handler(full_path: str):
+    return {"message": "CORS preflight successful"}
+
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
