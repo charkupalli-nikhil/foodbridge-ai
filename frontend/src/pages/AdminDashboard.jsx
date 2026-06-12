@@ -52,6 +52,55 @@ function formatDateTime(value) {
   });
 }
 
+function formatAiConfidence(value) {
+  if (value === null || value === undefined || value === "") {
+    return "Not available";
+  }
+
+  const numericValue = Number(value);
+
+  if (Number.isNaN(numericValue)) {
+    return "Not available";
+  }
+
+  if (Number.isInteger(numericValue)) {
+    return `${numericValue}%`;
+  }
+
+  return `${numericValue.toFixed(2)}%`;
+}
+
+function formatPredictionMethod(value) {
+  if (!value) {
+    return "Legacy Record";
+  }
+
+  if (value === "ml_model") {
+    return "ML Model";
+  }
+
+  if (value === "rule_fallback") {
+    return "Rule Fallback";
+  }
+
+  if (value === "rule_fallback_after_ml_error") {
+    return "Fallback After ML Error";
+  }
+
+  return value
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function getPriorityClass(priority) {
+  if (!priority) {
+    return "medium";
+  }
+
+  return priority.toLowerCase();
+}
+
 async function readErrorMessage(response) {
   try {
     const errorData = await response.json();
@@ -187,8 +236,9 @@ function AdminDashboard() {
         <div className="safety-note">
           <h3>Platform Monitoring</h3>
           <p>
-            Monitor registered organisations, donation workflows and recovered
-            meal impact across the FoodBridge platform.
+            Monitor registered organisations, donation workflows, AI priority
+            predictions and recovered meal impact across the FoodBridge
+            platform.
           </p>
         </div>
 
@@ -226,7 +276,8 @@ function AdminDashboard() {
         <section className="demo-information">
           <strong>Secure admin access:</strong> Platform information is loaded
           from MongoDB through administrator-only API endpoints protected by
-          your authenticated login token.
+          your authenticated login token. New donation records now include
+          machine-learning priority prediction details.
         </section>
 
         {errorMessage && (
@@ -394,9 +445,11 @@ function AdminDashboard() {
 
                       <div className="admin-card-pills">
                         <span
-                          className={`priority-pill ${donation.priority.toLowerCase()}`}
+                          className={`priority-pill ${getPriorityClass(
+                            donation.priority
+                          )}`}
                         >
-                          {donation.priority}
+                          AI Priority: {donation.priority || "Medium"}
                         </span>
 
                         <span
@@ -427,7 +480,36 @@ function AdminDashboard() {
                         <span>Posted</span>
                         <strong>{formatDateTime(donation.createdAt)}</strong>
                       </div>
+
+                      <div>
+                        <span>AI Confidence</span>
+                        <strong>
+                          {formatAiConfidence(donation.aiConfidence)}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Prediction Method</span>
+                        <strong>
+                          {formatPredictionMethod(donation.predictionMethod)}
+                        </strong>
+                      </div>
                     </div>
+
+                    {donation.predictionFeatures && (
+                      <p className="admin-assignment-text">
+                        ML Features:{" "}
+                        <strong>
+                          {donation.predictionFeatures.preparation_age_minutes ??
+                            "N/A"}{" "}
+                          min prepared age •{" "}
+                          {donation.predictionFeatures.pickup_window_minutes ??
+                            "N/A"}{" "}
+                          min pickup window • Packaging score{" "}
+                          {donation.predictionFeatures.packaging_score ?? "N/A"}
+                        </strong>
+                      </p>
+                    )}
 
                     {donation.acceptedByOrganisation && (
                       <p className="admin-assignment-text">

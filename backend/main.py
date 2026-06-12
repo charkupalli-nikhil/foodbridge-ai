@@ -1,6 +1,11 @@
+import os
+import uuid
+
+from fastapi import UploadFile, File
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from bson import ObjectId
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -9,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
+from fastapi.staticfiles import StaticFiles
 
 from database import (
     check_database_connection,
@@ -16,6 +22,7 @@ from database import (
     initialise_database_indexes,
     users_collection,
 )
+from prediction import predict_food_priority
 from security import (
     create_access_token,
     decode_access_token,
@@ -27,6 +34,15 @@ PriorityType = Literal["High", "Medium", "Low"]
 DonationStatusType = Literal["Active", "Accepted", "Collected"]
 UserRoleType = Literal["donor", "ngo", "admin"]
 RegistrationRoleType = Literal["donor", "ngo"]
+FoodCategoryType = Literal[
+    "Cooked Meal",
+    "Packaged Food",
+    "Bakery",
+    "Fruits",
+    "Vegetables",
+    "Dairy",
+    "Snacks",
+]
 
 
 class UserRegister(BaseModel):
@@ -65,12 +81,14 @@ class AuthResponse(BaseModel):
 
 class DonationCreate(BaseModel):
     foodName: str = Field(min_length=2, max_length=100)
-    category: Literal["Cooked Meal", "Packaged Food", "Bakery", "Fruits"]
+    category: FoodCategoryType
     servings: int = Field(gt=0, le=10000)
     preparationTime: str = Field(min_length=2, max_length=150)
     pickupDeadline: datetime
     location: str = Field(min_length=2, max_length=200)
     packagingCondition: str = Field(min_length=2, max_length=300)
+    foodImage: str | None = None
+    packagingImage: str | None = None
 
 
 class Donation(BaseModel):
@@ -87,6 +105,11 @@ class Donation(BaseModel):
     priority: PriorityType
     status: DonationStatusType
     createdAt: datetime
+
+    aiConfidence: float | None = None
+    predictionMethod: str | None = None
+    predictionFeatures: dict[str, Any] | None = None
+
     acceptedByName: str | None = None
     acceptedByOrganisation: str | None = None
     acceptedByLocation: str | None = None
@@ -130,15 +153,24 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="FoodBridge AI API",
     description="Backend API for surplus food recovery and distribution platform.",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
+os.makedirs("uploads/food", exist_ok=True)
+os.makedirs("uploads/packaging", exist_ok=True)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory="uploads"),
+    name="uploads",
+)
 allowed_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://foodbridge-ai-frontend.onrender.com",
 ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -148,6 +180,26 @@ app.add_middleware(
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_current_datetime_for(deadline: datetime) -> datetime:
+    if deadline.tzinfo is not None and deadline.utcoffset() is not None:
+        return datetime.now(deadline.tzinfo)
+
+    return datetime.now()
+
+
+def normalise_priority(priority: str | None) -> PriorityType:
+    if priority == "High":
+        return "High"
+
+    if priority == "Medium":
+        return "Medium"
+
+    if priority == "Low":
+        return "Low"
+
+    return "Medium"
 
 
 def document_to_user(document: dict) -> UserPublic:
@@ -181,6 +233,9 @@ def document_to_donation(document: dict) -> Donation:
         priority=document["priority"],
         status=document["status"],
         createdAt=document["createdAt"],
+        aiConfidence=document.get("aiConfidence"),
+        predictionMethod=document.get("predictionMethod"),
+        predictionFeatures=document.get("predictionFeatures"),
         acceptedByName=document.get("acceptedByName"),
         acceptedByOrganisation=document.get("acceptedByOrganisation"),
         acceptedByLocation=document.get("acceptedByLocation"),
@@ -191,16 +246,74 @@ def document_to_donation(document: dict) -> Donation:
 
 def calculate_priority(category: str, pickup_deadline: datetime) -> PriorityType:
     minutes_remaining = (
-        pickup_deadline - datetime.now()
+        pickup_deadline - get_current_datetime_for(pickup_deadline)
     ).total_seconds() / 60
 
     if category == "Cooked Meal" or minutes_remaining <= 90:
         return "High"
 
-    if category in ["Bakery", "Fruits"] or minutes_remaining <= 240:
+    if category in ["Bakery", "Fruits", "Vegetables", "Dairy"] or minutes_remaining <= 240:
         return "Medium"
 
     return "Low"
+
+
+def generate_ai_priority_payload(donation_data: DonationCreate) -> dict[str, Any]:
+    """
+    Uses the trained ML model to predict donation priority.
+
+    Stored fields:
+    - priority: High / Medium / Low
+    - aiConfidence: confidence percentage
+    - predictionMethod: ml_model / rule_fallback
+    - predictionFeatures: feature values used by the model
+    """
+
+    try:
+        prediction_result = predict_food_priority(
+            category=donation_data.category,
+            servings=donation_data.servings,
+            preparation_time=donation_data.preparationTime,
+            pickup_deadline=donation_data.pickupDeadline,
+            packaging_condition=donation_data.packagingCondition,
+        )
+
+        predicted_priority = normalise_priority(
+            str(prediction_result.get("priority"))
+        )
+
+        raw_confidence = float(prediction_result.get("confidence", 0))
+
+        if raw_confidence <= 1:
+            confidence_percentage = round(raw_confidence * 100, 2)
+        else:
+            confidence_percentage = round(raw_confidence, 2)
+
+        return {
+            "priority": predicted_priority,
+            "aiConfidence": confidence_percentage,
+            "predictionMethod": prediction_result.get("method", "ml_model"),
+            "predictionFeatures": prediction_result.get("features", {}),
+        }
+
+    except Exception:
+        fallback_priority = calculate_priority(
+            donation_data.category,
+            donation_data.pickupDeadline,
+        )
+
+        return {
+            "priority": fallback_priority,
+            "aiConfidence": None,
+            "predictionMethod": "rule_fallback_after_ml_error",
+            "predictionFeatures": {
+                "category": donation_data.category,
+                "servings": donation_data.servings,
+                "preparationTime": donation_data.preparationTime,
+                "pickupDeadline": donation_data.pickupDeadline.isoformat(),
+                "packagingCondition": donation_data.packagingCondition,
+            },
+        }
 
 
 def validate_donation_id(donation_id: str) -> ObjectId:
@@ -274,6 +387,8 @@ def read_root():
     return {
         "application": "FoodBridge AI API",
         "message": "Backend server is running successfully.",
+        "version": "1.1.0",
+        "aiPriorityPrediction": "enabled",
     }
 
 
@@ -285,6 +400,7 @@ def health_check():
         "status": "healthy" if database_connected else "database disconnected",
         "service": "FoodBridge AI Backend",
         "database": "connected" if database_connected else "not connected",
+        "aiPriorityPrediction": "enabled",
     }
 
 
@@ -465,6 +581,30 @@ def get_my_pickups(
 
 
 @app.post(
+    @app.post("/api/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    image_type: str = "food",
+):
+    if image_type not in ["food", "packaging"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image type",
+        )
+
+    extension = file.filename.split(".")[-1]
+
+    filename = f"{uuid.uuid4()}.{extension}"
+
+    save_folder = f"uploads/{image_type}"
+    save_path = f"{save_folder}/{filename}"
+
+    with open(save_path, "wb") as buffer:
+        buffer.write(await file.read())
+
+    return {
+        "imageUrl": f"/uploads/{image_type}/{filename}"
+    }
     "/api/donations",
     response_model=Donation,
     status_code=status.HTTP_201_CREATED,
@@ -475,23 +615,25 @@ def create_donation(
 ):
     require_role(current_user, "donor")
 
-    if donation_data.pickupDeadline <= datetime.now():
+    if donation_data.pickupDeadline <= get_current_datetime_for(
+        donation_data.pickupDeadline
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Pickup deadline must be later than the current time.",
         )
 
-    priority = calculate_priority(
-        donation_data.category,
-        donation_data.pickupDeadline,
-    )
+    prediction_payload = generate_ai_priority_payload(donation_data)
 
     donation_document = {
         **donation_data.model_dump(),
         "donorUserId": current_user.id,
         "donorName": current_user.fullName,
         "donorOrganisation": current_user.organisation,
-        "priority": priority,
+        "priority": prediction_payload["priority"],
+        "aiConfidence": prediction_payload["aiConfidence"],
+        "predictionMethod": prediction_payload["predictionMethod"],
+        "predictionFeatures": prediction_payload["predictionFeatures"],
         "status": "Active",
         "createdAt": datetime.now(),
         "acceptedByUserId": None,

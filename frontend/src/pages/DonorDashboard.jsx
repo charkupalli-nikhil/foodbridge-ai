@@ -58,6 +58,55 @@ function formatDateTime(value) {
   });
 }
 
+function formatAiConfidence(value) {
+  if (value === null || value === undefined || value === "") {
+    return "Not available";
+  }
+
+  const numericValue = Number(value);
+
+  if (Number.isNaN(numericValue)) {
+    return "Not available";
+  }
+
+  if (Number.isInteger(numericValue)) {
+    return `${numericValue}%`;
+  }
+
+  return `${numericValue.toFixed(2)}%`;
+}
+
+function formatPredictionMethod(value) {
+  if (!value) {
+    return "Legacy Record";
+  }
+
+  if (value === "ml_model") {
+    return "ML Model";
+  }
+
+  if (value === "rule_fallback") {
+    return "Rule Fallback";
+  }
+
+  if (value === "rule_fallback_after_ml_error") {
+    return "Fallback After ML Error";
+  }
+
+  return value
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function getPriorityClass(priority) {
+  if (!priority) {
+    return "medium";
+  }
+
+  return priority.toLowerCase();
+}
+
 function getMinimumDeadline() {
   const now = new Date();
   const localTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -192,9 +241,10 @@ function DonorDashboard() {
       const response = await authenticatedRequest("/donations", {
         method: "POST",
         body: JSON.stringify({
-          ...formData,
-          servings: Number(formData.servings),
-        }),
+         ...formData,
+         servings: Number(formData.servings),
+         pickupDeadline: new Date(formData.pickupDeadline).toISOString(),
+         }),
       });
 
       if (!response.ok) {
@@ -207,7 +257,11 @@ function DonorDashboard() {
       setFormData(emptyDonationForm);
 
       showSuccessMessage(
-        `Donation posted successfully. Backend assigned ${createdDonation.priority} priority.`
+        `Donation posted successfully. AI assigned ${
+          createdDonation.priority
+        } priority with ${formatAiConfidence(
+          createdDonation.aiConfidence
+        )} confidence.`
       );
 
       await loadDashboardData();
@@ -249,10 +303,11 @@ function DonorDashboard() {
         </nav>
 
         <div className="safety-note">
-          <h3>Safety Reminder</h3>
+          <h3>AI Priority Reminder</h3>
           <p>
-            FoodBridge assigns pickup priority only. Food safety verification
-            must be completed by the responsible organisations.
+            FoodBridge AI predicts pickup priority using donation details.
+            Food safety verification must still be completed by the responsible
+            organisations.
           </p>
         </div>
 
@@ -279,7 +334,8 @@ function DonorDashboard() {
 
         <section className="demo-information">
           <strong>Secure account connected:</strong> Your donations are stored
-          in MongoDB and protected through your authenticated donor account.
+          in MongoDB and protected through your authenticated donor account. New
+          food listings are analysed by the AI priority prediction model.
         </section>
 
         {errorMessage && (
@@ -342,7 +398,7 @@ function DonorDashboard() {
           <article className="donation-form-container" id="add-donation">
             <div className="dashboard-section-title">
               <div>
-                <p>NEW LISTING</p>
+                <p>AI-ASSISTED LISTING</p>
                 <h2>Add Food Donation</h2>
               </div>
             </div>
@@ -382,6 +438,9 @@ function DonorDashboard() {
                     <option value="Packaged Food">Packaged Food</option>
                     <option value="Bakery">Bakery</option>
                     <option value="Fruits">Fruits</option>
+                    <option value="Vegetables">Vegetables</option>
+                    <option value="Dairy">Dairy</option>
+                    <option value="Snacks">Snacks</option>
                   </select>
                 </label>
               </div>
@@ -459,7 +518,9 @@ function DonorDashboard() {
                 type="submit"
                 disabled={isSubmitting}
               >
-                {isSubmitting ? "Posting Donation..." : "Post Food Donation"}
+                {isSubmitting
+                  ? "Running AI Prediction..."
+                  : "Post Food Donation"}
               </button>
             </form>
           </article>
@@ -467,7 +528,7 @@ function DonorDashboard() {
           <article className="donation-list-container" id="my-donations">
             <div className="dashboard-section-title">
               <div>
-                <p>YOUR ACTIVITY</p>
+                <p>YOUR AI-TRACKED ACTIVITY</p>
                 <h2>My Donations</h2>
               </div>
 
@@ -496,9 +557,11 @@ function DonorDashboard() {
                       </div>
 
                       <span
-                        className={`priority-pill ${donation.priority.toLowerCase()}`}
+                        className={`priority-pill ${getPriorityClass(
+                          donation.priority
+                        )}`}
                       >
-                        {donation.priority}
+                        AI Priority: {donation.priority || "Medium"}
                       </span>
                     </div>
 
@@ -520,6 +583,20 @@ function DonorDashboard() {
                           {donation.status}
                         </strong>
                       </div>
+
+                      <div>
+                        <span>AI Confidence</span>
+                        <strong>
+                          {formatAiConfidence(donation.aiConfidence)}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Prediction Method</span>
+                        <strong>
+                          {formatPredictionMethod(donation.predictionMethod)}
+                        </strong>
+                      </div>
                     </div>
 
                     <p className="record-location">📍 {donation.location}</p>
@@ -527,6 +604,19 @@ function DonorDashboard() {
                     <p className="record-deadline">
                       Pickup deadline: {formatDateTime(donation.pickupDeadline)}
                     </p>
+
+                    {donation.predictionFeatures && (
+                      <p className="record-deadline">
+                        ML features used:{" "}
+                        {donation.predictionFeatures.preparation_age_minutes ??
+                          "N/A"}{" "}
+                        min prepared age •{" "}
+                        {donation.predictionFeatures.pickup_window_minutes ??
+                          "N/A"}{" "}
+                        min pickup window • Packaging score{" "}
+                        {donation.predictionFeatures.packaging_score ?? "N/A"}
+                      </p>
+                    )}
 
                     {donation.status === "Active" && (
                       <p className="record-deadline">

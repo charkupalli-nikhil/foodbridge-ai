@@ -17,6 +17,7 @@ if not MONGODB_URI:
 client = MongoClient(
     MONGODB_URI,
     serverSelectionTimeoutMS=8000,
+    tz_aware=True,
 )
 
 database = client[MONGODB_DATABASE]
@@ -60,4 +61,11 @@ def initialise_database_indexes() -> None:
     donations_collection.create_index(
         [("acceptedByUserId", ASCENDING), ("createdAt", DESCENDING)],
         name="donations_ngo_created_at",
+    )
+
+    donations_collection.create_index(
+        [("pickupDeadline", ASCENDING)],
+        expireAfterSeconds=0,
+        partialFilterExpression={"status": "Active"},
+        name="delete_expired_active_donations",
     )

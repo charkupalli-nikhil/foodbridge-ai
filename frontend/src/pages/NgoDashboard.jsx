@@ -49,6 +49,55 @@ function formatDateTime(value) {
   });
 }
 
+function formatAiConfidence(value) {
+  if (value === null || value === undefined || value === "") {
+    return "Not available";
+  }
+
+  const numericValue = Number(value);
+
+  if (Number.isNaN(numericValue)) {
+    return "Not available";
+  }
+
+  if (Number.isInteger(numericValue)) {
+    return `${numericValue}%`;
+  }
+
+  return `${numericValue.toFixed(2)}%`;
+}
+
+function formatPredictionMethod(value) {
+  if (!value) {
+    return "Legacy Record";
+  }
+
+  if (value === "ml_model") {
+    return "ML Model";
+  }
+
+  if (value === "rule_fallback") {
+    return "Rule Fallback";
+  }
+
+  if (value === "rule_fallback_after_ml_error") {
+    return "Fallback After ML Error";
+  }
+
+  return value
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function getPriorityClass(priority) {
+  if (!priority) {
+    return "medium";
+  }
+
+  return priority.toLowerCase();
+}
+
 async function readErrorMessage(response) {
   try {
     const errorData = await response.json();
@@ -144,9 +193,7 @@ function NgoDashboard() {
       setMyPickups(pickupData);
       setStatistics(statisticsData);
     } catch (error) {
-      setErrorMessage(
-        error.message || "Unable to load the NGO dashboard."
-      );
+      setErrorMessage(error.message || "Unable to load the NGO dashboard.");
     } finally {
       setIsLoading(false);
     }
@@ -216,9 +263,7 @@ function NgoDashboard() {
 
       await loadDashboardData();
     } catch (error) {
-      setErrorMessage(
-        error.message || "Unable to complete this pickup."
-      );
+      setErrorMessage(error.message || "Unable to complete this pickup.");
     } finally {
       setProcessingId("");
     }
@@ -255,10 +300,11 @@ function NgoDashboard() {
         </nav>
 
         <div className="safety-note">
-          <h3>Safety Verification</h3>
+          <h3>AI Priority Support</h3>
           <p>
-            FoodBridge recommends pickup priority only. Your organisation must
-            verify food condition and safe handling before distribution.
+            FoodBridge AI predicts pickup priority using donation details.
+            Your organisation must still verify food condition and safe handling
+            before distribution.
           </p>
         </div>
 
@@ -296,7 +342,8 @@ function NgoDashboard() {
         <section className="demo-information">
           <strong>Secure NGO workflow connected:</strong> Available donations
           and assigned pickups are read from MongoDB using your authenticated
-          NGO account.
+          NGO account. New listings include AI priority prediction and
+          confidence information.
         </section>
 
         {successMessage && (
@@ -349,7 +396,7 @@ function NgoDashboard() {
           <article className="ngo-panel" id="available-donations">
             <div className="dashboard-section-title">
               <div>
-                <p>NEARBY REQUESTS</p>
+                <p>AI-PRIORITISED REQUESTS</p>
                 <h2>Available Donations</h2>
               </div>
 
@@ -382,9 +429,11 @@ function NgoDashboard() {
                       </div>
 
                       <span
-                        className={`priority-pill ${donation.priority.toLowerCase()}`}
+                        className={`priority-pill ${getPriorityClass(
+                          donation.priority
+                        )}`}
                       >
-                        {donation.priority}
+                        AI Priority: {donation.priority || "Medium"}
                       </span>
                     </div>
 
@@ -400,6 +449,20 @@ function NgoDashboard() {
                           {donation.status}
                         </strong>
                       </div>
+
+                      <div>
+                        <span>AI Confidence</span>
+                        <strong>
+                          {formatAiConfidence(donation.aiConfidence)}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Prediction Method</span>
+                        <strong>
+                          {formatPredictionMethod(donation.predictionMethod)}
+                        </strong>
+                      </div>
                     </div>
 
                     <p className="ngo-location">📍 {donation.location}</p>
@@ -407,6 +470,19 @@ function NgoDashboard() {
                     <p className="ngo-deadline">
                       Pickup before: {formatDateTime(donation.pickupDeadline)}
                     </p>
+
+                    {donation.predictionFeatures && (
+                      <p className="ngo-deadline">
+                        ML features used:{" "}
+                        {donation.predictionFeatures.preparation_age_minutes ??
+                          "N/A"}{" "}
+                        min prepared age •{" "}
+                        {donation.predictionFeatures.pickup_window_minutes ??
+                          "N/A"}{" "}
+                        min pickup window • Packaging score{" "}
+                        {donation.predictionFeatures.packaging_score ?? "N/A"}
+                      </p>
+                    )}
 
                     <p className="ngo-packaging">
                       <strong>Packaging:</strong> {donation.packagingCondition}
@@ -472,12 +548,39 @@ function NgoDashboard() {
                     </div>
 
                     <div>
-                      <span>Priority</span>
-                      <strong>{donation.priority}</strong>
+                      <span>AI Priority</span>
+                      <strong>{donation.priority || "Medium"}</strong>
+                    </div>
+
+                    <div>
+                      <span>AI Confidence</span>
+                      <strong>
+                        {formatAiConfidence(donation.aiConfidence)}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span>Prediction Method</span>
+                      <strong>
+                        {formatPredictionMethod(donation.predictionMethod)}
+                      </strong>
                     </div>
                   </div>
 
                   <p className="ngo-location">📍 {donation.location}</p>
+
+                  {donation.predictionFeatures && (
+                    <p className="ngo-deadline">
+                      ML features used:{" "}
+                      {donation.predictionFeatures.preparation_age_minutes ??
+                        "N/A"}{" "}
+                      min prepared age •{" "}
+                      {donation.predictionFeatures.pickup_window_minutes ??
+                        "N/A"}{" "}
+                      min pickup window • Packaging score{" "}
+                      {donation.predictionFeatures.packaging_score ?? "N/A"}
+                    </p>
+                  )}
 
                   {donation.acceptedAt && (
                     <p className="ngo-deadline">
