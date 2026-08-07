@@ -1,8 +1,12 @@
 import uuid
+import os
+import shutil
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
+
 
 from bson import ObjectId
 from fastapi import (
@@ -56,9 +60,31 @@ class UserRegister(BaseModel):
     email: EmailStr
     organisation: str = Field(min_length=2, max_length=150)
     role: RegistrationRoleType
+
+    organizationType: str | None = None
+
+    description: str | None = None
+
+    capacity: int | None = None
+
+    operatingHours: str | None = None
+
+    acceptedFoodTypes: list[str] = []
+    verificationStatus: str | None = "pending"
+
+    registrationCertificate: str | None = None
+
+    governmentId: str | None = None
+
+    organizationLogo: str | None = None
+
+    verifiedAt: datetime | None = None
+
+    verifiedBy: str | None = None
     location: str = Field(min_length=2, max_length=200)
     contactNumber: str = Field(min_length=10, max_length=15)
     password: str = Field(min_length=6, max_length=100)
+
     safetyAgreement: bool
 
 
@@ -72,8 +98,26 @@ class UserPublic(BaseModel):
     id: str
     fullName: str
     email: EmailStr
+
     organisation: str
     role: UserRoleType
+
+    # Receiver Profile
+    organizationType: str | None = None
+    description: str | None = None
+    capacity: int | None = None
+    operatingHours: str | None = None
+    acceptedFoodTypes: list[str] = []
+
+    # Verification
+    verificationStatus: str = "verified"
+    registrationCertificate: str | None = None
+    governmentId: str | None = None
+    organizationLogo: str |None = None
+    verifiedAt: datetime | None = None
+    verifiedBy: str | None = None
+
+    # Common
     location: str
     contactNumber: str
     createdAt: datetime
@@ -172,6 +216,13 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 FOOD_UPLOAD_DIR = UPLOAD_DIR / "food"
 PACKAGING_UPLOAD_DIR = UPLOAD_DIR / "packaging"
+CERTIFICATE_UPLOAD_DIR = UPLOAD_DIR / "certificates"
+GOVERNMENT_ID_UPLOAD_DIR = UPLOAD_DIR / "government_ids"
+LOGO_UPLOAD_DIR = UPLOAD_DIR / "logos"
+
+CERTIFICATE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+GOVERNMENT_ID_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+LOGO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 FOOD_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 PACKAGING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -232,6 +283,20 @@ def document_to_user(document: dict) -> UserPublic:
         email=document["email"],
         organisation=document["organisation"],
         role=document["role"],
+
+        organizationType=document.get("organizationType"),
+        description=document.get("description"),
+        capacity=document.get("capacity"),
+        operatingHours=document.get("operatingHours"),
+        acceptedFoodTypes=document.get("acceptedFoodTypes", []),
+
+        verificationStatus=document.get("verificationStatus", "verified"),
+        registrationCertificate=document.get("registrationCertificate"),
+        governmentId=document.get("governmentId"),
+        organizationLogo=document.get("organizationLogo"),
+        verifiedAt=document.get("verifiedAt"),
+        verifiedBy=document.get("verifiedBy"),
+
         location=document["location"],
         contactNumber=document["contactNumber"],
         createdAt=document["createdAt"],
@@ -495,10 +560,36 @@ def register_user(registration_data: UserRegister):
         )
 
     user_document = {
-        "fullName": registration_data.fullName.strip(),
-        "email": str(registration_data.email).lower(),
-        "organisation": registration_data.organisation.strip(),
-        "role": registration_data.role,
+    "fullName": registration_data.fullName.strip(),
+    "email": str(registration_data.email).lower(),
+    "organisation": registration_data.organisation.strip(),
+    "role": registration_data.role,
+
+    # Receiver profile
+    "organizationType": registration_data.organizationType,
+    "description": registration_data.description,
+    "capacity": registration_data.capacity,
+    "operatingHours": registration_data.operatingHours,
+    "acceptedFoodTypes": registration_data.acceptedFoodTypes,
+
+    # Verification fields
+    "verificationStatus": (
+        "verified"
+        if registration_data.role == "donor"
+        else "pending"
+    ),
+
+    "registrationCertificate": None,
+
+    "governmentId": None,
+
+    "organizationLogo": None,
+
+        "verifiedAt": None,
+
+        "verifiedBy": None,
+
+        # Common fields
         "location": registration_data.location.strip(),
         "contactNumber": registration_data.contactNumber.strip(),
         "passwordHash": hash_password(registration_data.password),

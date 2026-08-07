@@ -16,10 +16,14 @@ if not MONGODB_URI:
 
 client = MongoClient(
     MONGODB_URI,
-    serverSelectionTimeoutMS=8000,
+    serverSelectionTimeoutMS=30000,
+    connectTimeoutMS=30000,
+    socketTimeoutMS=30000,
     tz_aware=True,
 )
+client.admin.command("ping")
 
+print("MongoDB Connected Successfully")
 database = client[MONGODB_DATABASE]
 
 users_collection = database["users"]

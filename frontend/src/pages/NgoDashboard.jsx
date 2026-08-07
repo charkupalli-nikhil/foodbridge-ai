@@ -19,8 +19,9 @@ function getStoredUser() {
 
   if (!storedUser) {
     return {
-      fullName: "NGO Coordinator",
-      organisation: "Registered NGO Partner",
+      fullName: "Receiver Coordinator",
+      organisation: "Registered Receiver Organization",
+      organizationType: "Receiver",
       location: "",
     };
   }
@@ -29,8 +30,9 @@ function getStoredUser() {
     return JSON.parse(storedUser);
   } catch {
     return {
-      fullName: "NGO Coordinator",
-      organisation: "Registered NGO Partner",
+      fullName: "Receiver Coordinator",
+      organisation: "Registered Receiver Organization",
+      organizationType: "Receiver",
       location: "",
     };
   }
@@ -254,7 +256,7 @@ function NgoDashboard() {
       setMyPickups(pickupData);
       setStatistics(statisticsData);
     } catch (error) {
-      setErrorMessage(error.message || "Unable to load the NGO dashboard.");
+      setErrorMessage(error.message || "Unable to load the receiver dashboard.");
     } finally {
       setIsLoading(false);
     }
@@ -290,7 +292,7 @@ function NgoDashboard() {
       }
 
       showSuccessMessage(
-        "Pickup accepted successfully. It is now assigned to your NGO account."
+        "Pickup accepted successfully. It is now assigned to your receiver account."
       );
 
       await loadDashboardData();
@@ -342,7 +344,7 @@ function NgoDashboard() {
 
           <div>
             <h2>FoodBridge AI</h2>
-            <p>NGO Portal</p>
+            <p>Receiver Portal</p>
           </div>
         </Link>
 
@@ -364,7 +366,7 @@ function NgoDashboard() {
           <h3>AI Priority Support</h3>
           <p>
             FoodBridge AI predicts pickup priority using donation details. Your
-            organisation must still verify food condition and safe handling
+            receiver organisation must still verify food condition and safe handling
             before distribution.
           </p>
         </div>
@@ -377,12 +379,23 @@ function NgoDashboard() {
       <main className="dashboard-main ngo-dashboard-main">
         <header className="dashboard-header" id="ngo-overview">
           <div>
-            <p className="dashboard-label">NGO DASHBOARD</p>
+            <p className="dashboard-label">RECEIVER DASHBOARD</p>
             <h1>Welcome, {ngo.fullName}</h1>
-            <span>
-              {ngo.organisation}
-              {ngo.location ? ` • ${ngo.location}` : ""}
-            </span>
+            <div className="receiver-subtitle">
+              <strong>{ngo.organisation}</strong>
+
+              <div
+                style={{
+                  color: "#64748b",
+                  marginTop: "4px",
+                  fontSize: "14px",
+                }}
+              >
+                {ngo.organizationType || "Receiver Organization"}
+
+                {ngo.location ? ` • ${ngo.location}` : ""}
+              </div>
+            </div>
           </div>
 
           <div className="ngo-header-actions">
@@ -401,7 +414,7 @@ function NgoDashboard() {
         </header>
 
         <section className="demo-information">
-          <strong>Secure NGO workflow connected:</strong> Available donations
+          <strong>Secure receiver workflow connected:</strong> Available donations
           and assigned pickups are read from MongoDB using your authenticated NGO
           account. New listings include AI priority prediction, confidence
           information, food images and packaging images.

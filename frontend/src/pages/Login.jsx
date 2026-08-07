@@ -219,7 +219,6 @@ function Login() {
             <label htmlFor="login-role">
               Login As
               <select
-                id="login-role"
                 name="role"
                 value={formData.role}
                 onChange={handleChange}
@@ -228,10 +227,8 @@ function Login() {
                 <option value="" disabled>
                   Select your role
                 </option>
-
                 <option value="donor">Food Donor</option>
-                <option value="ngo">NGO Partner</option>
-                <option value="admin">Administrator</option>
+                <option value="ngo">Receiver Organization</option>
               </select>
             </label>
 
