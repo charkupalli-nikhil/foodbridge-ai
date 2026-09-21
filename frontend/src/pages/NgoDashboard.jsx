@@ -575,6 +575,17 @@ function NgoDashboard() {
                       </p>
                     )}
 
+                    {donation.imageAnalysis && (
+                      <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
+                        <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
+                          <span>
+                            <strong>AI Vision Analysis:</strong> Quality Score {Math.round(donation.imageAnalysis.qualityScore * 100)}%. {donation.imageAnalysis.notes}
+                          </span>
+                        </p>
+                      </div>
+                    )}
+
                     <p className="ngo-packaging">
                       <strong>Packaging:</strong> {donation.packagingCondition}
                     </p>
@@ -675,6 +686,17 @@ function NgoDashboard() {
                       min pickup window • Packaging score{" "}
                       {donation.predictionFeatures.packaging_score ?? "N/A"}
                     </p>
+                  )}
+
+                  {donation.imageAnalysis && (
+                    <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
+                      <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
+                        <span>
+                          <strong>AI Vision Analysis:</strong> Quality Score {Math.round(donation.imageAnalysis.qualityScore * 100)}%. {donation.imageAnalysis.notes}
+                        </span>
+                      </p>
+                    </div>
                   )}
 
                   {donation.acceptedAt && (

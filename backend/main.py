@@ -162,6 +162,7 @@ class Donation(BaseModel):
     aiConfidence: float | None = None
     predictionMethod: str | None = None
     predictionFeatures: dict[str, Any] | None = None
+    imageAnalysis: dict[str, Any] | None = None
     acceptedByName: str | None = None
     acceptedByOrganisation: str | None = None
     acceptedByLocation: str | None = None
@@ -347,6 +348,7 @@ def document_to_donation(document: dict) -> Donation:
         aiConfidence=document.get("aiConfidence"),
         predictionMethod=document.get("predictionMethod"),
         predictionFeatures=document.get("predictionFeatures"),
+        imageAnalysis=document.get("imageAnalysis"),
         acceptedByName=document.get("acceptedByName"),
         acceptedByOrganisation=document.get("acceptedByOrganisation"),
         acceptedByLocation=document.get("acceptedByLocation"),
@@ -942,6 +944,11 @@ def create_donation(
 
     prediction_payload = generate_ai_priority_payload(donation_data)
 
+    image_analysis_result = None
+    if donation_data.foodImage:
+        from ml.image_analysis import analyze_food_image
+        image_analysis_result = analyze_food_image(donation_data.foodImage)
+
     donation_document = {
         **donation_data.model_dump(),
         "donorUserId": current_user.id,
@@ -951,6 +958,7 @@ def create_donation(
         "aiConfidence": prediction_payload["aiConfidence"],
         "predictionMethod": prediction_payload["predictionMethod"],
         "predictionFeatures": prediction_payload["predictionFeatures"],
+        "imageAnalysis": image_analysis_result,
         "status": "Active",
         "createdAt": datetime.now(),
         "acceptedByUserId": None,

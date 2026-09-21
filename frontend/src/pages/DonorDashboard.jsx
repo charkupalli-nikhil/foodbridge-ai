@@ -464,6 +464,7 @@ function DonorDashboard() {
                     id="foodImage"
                     type="file"
                     accept="image/*"
+                    capture="environment"
                     onChange={handleFoodImageChange}
                   />
 
@@ -482,6 +483,7 @@ function DonorDashboard() {
                     id="packagingImage"
                     type="file"
                     accept="image/*"
+                    capture="environment"
                     onChange={handlePackagingImageChange}
                   />
 
