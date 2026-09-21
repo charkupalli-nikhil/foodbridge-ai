@@ -117,6 +117,7 @@ class UserPublic(BaseModel):
     organizationLogo: str |None = None
     verifiedAt: datetime | None = None
     verifiedBy: str | None = None
+    rejectionReason: str | None = None
 
     # Common
     location: str
@@ -306,12 +307,16 @@ def document_to_user(document: dict) -> UserPublic:
         operatingHours=document.get("operatingHours"),
         acceptedFoodTypes=document.get("acceptedFoodTypes", []),
 
-        verificationStatus=document.get("verificationStatus", "verified"),
+        verificationStatus=document.get(
+            "verificationStatus",
+            "verified" if document.get("role") == "donor" else "pending"
+        ),
         registrationCertificate=document.get("registrationCertificate"),
         governmentId=document.get("governmentId"),
         organizationLogo=document.get("organizationLogo"),
         verifiedAt=document.get("verifiedAt"),
         verifiedBy=document.get("verifiedBy"),
+        rejectionReason=document.get("rejectionReason"),
 
         location=document["location"],
         contactNumber=document["contactNumber"],
@@ -475,6 +480,15 @@ def require_role(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"This action requires a {required_role} account.",
+        )
+
+
+def require_verified_ngo(current_user: UserPublic) -> None:
+    require_role(current_user, "ngo")
+    if current_user.verificationStatus != "verified":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your organization is currently under verification. Please wait for administrator approval.",
         )
 
 
@@ -871,7 +885,7 @@ def get_my_donations(
 def get_available_donations(
     current_user: Annotated[UserPublic, Depends(get_current_user)],
 ):
-    require_role(current_user, "ngo")
+    require_verified_ngo(current_user)
 
     try:
         documents = donations_collection.find(
@@ -977,7 +991,7 @@ def accept_donation(
     donation_id: str,
     current_user: Annotated[UserPublic, Depends(get_current_user)],
 ):
-    require_role(current_user, "ngo")
+    require_verified_ngo(current_user)
     object_id = validate_donation_id(donation_id)
 
     try:
@@ -1035,7 +1049,7 @@ def mark_donation_as_collected(
     donation_id: str,
     current_user: Annotated[UserPublic, Depends(get_current_user)],
 ):
-    require_role(current_user, "ngo")
+    require_verified_ngo(current_user)
     object_id = validate_donation_id(donation_id)
 
     try:
@@ -1328,3 +1342,105 @@ def get_all_donations_for_admin(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to load platform donations.",
         ) from error
+
+
+class RejectionRequest(BaseModel):
+    rejectionReason: str = Field(min_length=1, max_length=500)
+
+
+@app.get("/api/admin/verification/pending", response_model=list[UserPublic])
+def get_pending_verifications(
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    require_role(current_user, "admin")
+
+    try:
+        user_documents = users_collection.find(
+            {"role": "ngo", "verificationStatus": "pending"}
+        ).sort("createdAt", DESCENDING)
+
+        return [document_to_user(document) for document in user_documents]
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load pending verifications.",
+        ) from error
+
+
+@app.put("/api/admin/verification/{user_id}/approve")
+def approve_verification(
+    user_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    require_role(current_user, "admin")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format.",
+        )
+
+    try:
+        result = users_collection.update_one(
+            {"_id": ObjectId(user_id), "role": "ngo"},
+            {
+                "$set": {
+                    "verificationStatus": "verified",
+                    "verifiedAt": datetime.now(),
+                    "verifiedBy": current_user.id,
+                },
+                "$unset": {"rejectionReason": ""}
+            }
+        )
+
+        if result.matched_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found or is not an NGO.",
+            )
+
+        return {"message": "Organization verified successfully."}
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to approve verification.",
+        ) from error
+
+
+@app.put("/api/admin/verification/{user_id}/reject")
+def reject_verification(
+    user_id: str,
+    rejection_data: RejectionRequest,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    require_role(current_user, "admin")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format.",
+        )
+
+    try:
+        result = users_collection.update_one(
+            {"_id": ObjectId(user_id), "role": "ngo"},
+            {
+                "$set": {
+                    "verificationStatus": "rejected",
+                    "rejectionReason": rejection_data.rejectionReason,
+                }
+            }
+        )
+
+        if result.matched_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found or is not an NGO.",
+            )
+
+        return {"message": "Organization verification rejected."}
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to reject verification.",
+        ) from error

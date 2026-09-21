@@ -184,6 +184,8 @@ function AdminDashboard() {
   const [statistics, setStatistics] = useState(emptyStatistics);
   const [users, setUsers] = useState([]);
   const [donations, setDonations] = useState([]);
+  const [pendingVerifications, setPendingVerifications] = useState([]);
+  const [processingId, setProcessingId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -222,11 +224,12 @@ function AdminDashboard() {
       setIsLoading(true);
       setErrorMessage("");
 
-      const [statisticsResponse, usersResponse, donationsResponse] =
+      const [statisticsResponse, usersResponse, donationsResponse, pendingResponse] =
         await Promise.all([
           authenticatedRequest("/admin/statistics"),
           authenticatedRequest("/admin/users"),
           authenticatedRequest("/admin/donations"),
+          authenticatedRequest("/admin/verification/pending"),
         ]);
 
       if (!statisticsResponse.ok) {
@@ -243,14 +246,21 @@ function AdminDashboard() {
         const message = await readErrorMessage(donationsResponse);
         throw new Error(message);
       }
+      
+      if (!pendingResponse.ok) {
+        const message = await readErrorMessage(pendingResponse);
+        throw new Error(message);
+      }
 
       const statisticsData = await statisticsResponse.json();
       const userData = await usersResponse.json();
       const donationData = await donationsResponse.json();
+      const pendingData = await pendingResponse.json();
 
       setStatistics(statisticsData);
       setUsers(userData);
       setDonations(donationData);
+      setPendingVerifications(pendingData);
     } catch (error) {
       setErrorMessage(
         error.message || "Unable to load the administrator dashboard."
@@ -268,6 +278,64 @@ function AdminDashboard() {
     clearSession();
   };
 
+  const handleApprove = async (userId) => {
+    try {
+      setProcessingId(userId);
+      const response = await authenticatedRequest(`/admin/verification/${userId}/approve`, {
+        method: "PUT"
+      });
+      if (!response.ok) throw new Error(await readErrorMessage(response));
+      await loadDashboardData();
+    } catch (err) {
+      setErrorMessage(err.message || "Failed to approve verification.");
+    } finally {
+      setProcessingId("");
+    }
+  };
+
+  const handleReject = async (userId) => {
+    const reason = window.prompt("Enter rejection reason:");
+    if (reason === null) return; // cancelled
+    if (!reason.trim()) {
+      alert("Rejection reason is required.");
+      return;
+    }
+    
+    try {
+      setProcessingId(userId);
+      const response = await authenticatedRequest(`/admin/verification/${userId}/reject`, {
+        method: "PUT",
+        body: JSON.stringify({ rejectionReason: reason })
+      });
+      if (!response.ok) throw new Error(await readErrorMessage(response));
+      await loadDashboardData();
+    } catch (err) {
+      setErrorMessage(err.message || "Failed to reject verification.");
+    } finally {
+      setProcessingId("");
+    }
+  };
+
+  const viewSecureDocument = async (documentPath) => {
+    if (!documentPath) return;
+    
+    const token = localStorage.getItem("accessToken") || localStorage.getItem("token") || localStorage.getItem("foodbridge_access_token");
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/verification-documents/${documentPath}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (!response.ok) throw new Error("Failed to load document");
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   return (
     <div className="dashboard-page">
       <aside className="dashboard-sidebar admin-sidebar">
@@ -283,6 +351,13 @@ function AdminDashboard() {
         <nav className="dashboard-navigation">
           <a className="active-dashboard-link" href="#admin-overview">
             <span>▦</span> Overview
+          </a>
+
+          <a href="#pending-verifications">
+            <span>🛡️</span> Verifications
+            {pendingVerifications.length > 0 && (
+              <span className="pending-badge">{pendingVerifications.length}</span>
+            )}
           </a>
 
           <a href="#platform-users">
@@ -421,6 +496,94 @@ function AdminDashboard() {
         </section>
 
         <section className="admin-content-grid">
+          <article className="admin-panel" id="pending-verifications">
+            <div className="dashboard-section-title">
+              <div>
+                <p>ACTION REQUIRED</p>
+                <h2>Pending Verifications</h2>
+              </div>
+              <span className="listing-count">{pendingVerifications.length} Requests</span>
+            </div>
+
+            {isLoading ? (
+              <p className="admin-loading-text">Loading verification requests...</p>
+            ) : (
+              <div className="admin-table-wrapper">
+                {pendingVerifications.length === 0 ? (
+                   <div className="admin-empty-state">No pending verifications.</div>
+                ) : (
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Organization</th>
+                        <th>Details</th>
+                        <th>Documents</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingVerifications.map((ngo) => (
+                        <tr key={ngo.id}>
+                          <td>
+                            <strong>{ngo.organisation}</strong>
+                            <span>{ngo.email}</span>
+                          </td>
+                          <td>
+                            <span style={{display: 'block', fontSize: '0.85rem'}}>{ngo.organizationType} • {ngo.location}</span>
+                            <span style={{display: 'block', fontSize: '0.85rem', color: '#64748b'}}>Capacity: {ngo.capacity}</span>
+                          </td>
+                          <td>
+                            <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+                              <button 
+                                onClick={() => viewSecureDocument(ngo.registrationCertificate)}
+                                disabled={!ngo.registrationCertificate}
+                                style={{background: 'none', border: 'none', color: ngo.registrationCertificate ? '#2563eb' : '#94a3b8', cursor: ngo.registrationCertificate ? 'pointer' : 'not-allowed', textAlign: 'left', padding: 0}}
+                              >
+                                📄 Certificate
+                              </button>
+                              <button 
+                                onClick={() => viewSecureDocument(ngo.governmentId)}
+                                disabled={!ngo.governmentId}
+                                style={{background: 'none', border: 'none', color: ngo.governmentId ? '#2563eb' : '#94a3b8', cursor: ngo.governmentId ? 'pointer' : 'not-allowed', textAlign: 'left', padding: 0}}
+                              >
+                                🆔 Govt ID
+                              </button>
+                              <button 
+                                onClick={() => viewSecureDocument(ngo.organizationLogo)}
+                                disabled={!ngo.organizationLogo}
+                                style={{background: 'none', border: 'none', color: ngo.organizationLogo ? '#2563eb' : '#94a3b8', cursor: ngo.organizationLogo ? 'pointer' : 'not-allowed', textAlign: 'left', padding: 0}}
+                              >
+                                🖼️ Logo
+                              </button>
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                              <button 
+                                onClick={() => handleApprove(ngo.id)}
+                                disabled={processingId === ngo.id}
+                                style={{backgroundColor: '#10b981', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem'}}
+                              >
+                                Approve
+                              </button>
+                              <button 
+                                onClick={() => handleReject(ngo.id)}
+                                disabled={processingId === ngo.id}
+                                style={{backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem'}}
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </article>
+
           <article className="admin-panel" id="platform-users">
             <div className="dashboard-section-title">
               <div>

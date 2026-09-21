@@ -225,6 +225,11 @@ function NgoDashboard() {
     try {
       setIsLoading(true);
       setErrorMessage("");
+      
+      if (ngo?.verificationStatus !== "verified") {
+        setIsLoading(false);
+        return;
+      }
 
       const [availableResponse, pickupsResponse, statisticsResponse] =
         await Promise.all([
@@ -468,6 +473,14 @@ function NgoDashboard() {
           </article>
         </section>
 
+        {ngo?.verificationStatus !== "verified" ? (
+          <section style={{background: '#fffbeb', padding: '40px 20px', borderRadius: '12px', border: '1px solid #fde68a', textAlign: 'center', marginTop: '20px'}}>
+            <h2 style={{color: '#92400e', marginBottom: '12px', fontSize: '1.5rem'}}>Organization Under Verification</h2>
+            <p style={{color: '#b45309', fontSize: '1.1rem', maxWidth: '600px', margin: '0 auto'}}>
+              Your organization is currently under verification. Please wait for administrator approval to access donation requests and coordinate collections.
+            </p>
+          </section>
+        ) : (
         <section className="ngo-content-grid">
           <article className="ngo-panel" id="available-donations">
             <div className="dashboard-section-title">
@@ -687,6 +700,7 @@ function NgoDashboard() {
             </div>
           </article>
         </section>
+        )}
       </main>
     </div>
   );

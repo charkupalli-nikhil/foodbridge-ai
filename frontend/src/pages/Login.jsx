@@ -229,6 +229,7 @@ function Login() {
                 </option>
                 <option value="donor">Food Donor</option>
                 <option value="ngo">Receiver Organization</option>
+                <option value="admin">Administrator</option>
               </select>
             </label>
 
