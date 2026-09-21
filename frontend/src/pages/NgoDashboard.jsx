@@ -349,9 +349,13 @@ function NgoDashboard() {
         </Link>
 
         <nav className="dashboard-navigation">
-          <a className="active-dashboard-link" href="#ngo-overview">
+          <Link to="/ngo-dashboard" className="active-dashboard-link">
             <span>▦</span> Overview
-          </a>
+          </Link>
+
+          <Link to="/ngo-verification">
+            <span>🛡️</span> Verification
+          </Link>
 
           <a href="#available-donations">
             <span>📍</span> Available Food

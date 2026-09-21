@@ -12,6 +12,7 @@ import Register from "./pages/Register";
 import DonorDashboard from "./pages/DonorDashboard";
 import NgoDashboard from "./pages/NgoDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import ReceiverVerification from "./pages/ReceiverVerification";
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -93,6 +94,15 @@ function App() {
           element={
             <ProtectedRoute allowedRole="ngo">
               <NgoDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/ngo-verification"
+          element={
+            <ProtectedRoute allowedRole="ngo">
+              <ReceiverVerification />
             </ProtectedRoute>
           }
         />

@@ -18,6 +18,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -213,24 +214,39 @@ app = FastAPI(
 # -----------------------------
 BASE_DIR = Path(__file__).resolve().parent
 
+# Upload directories
 UPLOAD_DIR = BASE_DIR / "uploads"
+
+# Donation image folders
 FOOD_UPLOAD_DIR = UPLOAD_DIR / "food"
 PACKAGING_UPLOAD_DIR = UPLOAD_DIR / "packaging"
-CERTIFICATE_UPLOAD_DIR = UPLOAD_DIR / "certificates"
-GOVERNMENT_ID_UPLOAD_DIR = UPLOAD_DIR / "government_ids"
-LOGO_UPLOAD_DIR = UPLOAD_DIR / "logos"
+
+# Receiver organization verification folders
+VERIFICATION_UPLOAD_DIR = UPLOAD_DIR / "verification"
+CERTIFICATE_UPLOAD_DIR = VERIFICATION_UPLOAD_DIR / "certificates"
+GOVERNMENT_ID_UPLOAD_DIR = VERIFICATION_UPLOAD_DIR / "government_ids"
+LOGO_UPLOAD_DIR = VERIFICATION_UPLOAD_DIR / "logos"
+
+
+# Create folders automatically if they don't exist
+FOOD_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+PACKAGING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 CERTIFICATE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 GOVERNMENT_ID_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 LOGO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-FOOD_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-PACKAGING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+# Make uploaded files accessible (excluding verification documents)
 app.mount(
-    "/uploads",
-    StaticFiles(directory=str(UPLOAD_DIR)),
-    name="uploads",
+    "/uploads/food",
+    StaticFiles(directory=str(FOOD_UPLOAD_DIR)),
+    name="uploads_food",
+)
+app.mount(
+    "/uploads/packaging",
+    StaticFiles(directory=str(PACKAGING_UPLOAD_DIR)),
+    name="uploads_packaging",
 )
 
 
@@ -545,6 +561,148 @@ async def upload_image(
         "message": "Image uploaded successfully.",
         "imageUrl": image_url,
     }
+
+
+@app.post("/api/users/me/verification-documents")
+async def upload_verification_document(
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+    file: UploadFile = File(...),
+    document_type: str = Form(...),
+):
+    require_role(current_user, "ngo")
+
+    if document_type not in ["registrationCertificate", "governmentId", "organizationLogo"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document type.",
+        )
+
+    # Validate file type
+    allowed_content_types = {
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+        "application/pdf",
+    }
+    
+    if document_type == "organizationLogo" and file.content_type == "application/pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Logo cannot be a PDF.",
+        )
+
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF, JPG, JPEG, PNG and WEBP files are allowed.",
+        )
+
+    original_filename = file.filename or ""
+    extension = original_filename.split(".")[-1].lower()
+
+    if extension not in ["jpg", "jpeg", "png", "webp", "pdf"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file extension.",
+        )
+
+    file_content = await file.read()
+    max_file_size = 5 * 1024 * 1024
+
+    if len(file_content) > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size must be less than 5 MB.",
+        )
+
+    filename = f"{uuid.uuid4()}.{extension}"
+
+    if document_type == "registrationCertificate":
+        save_path = CERTIFICATE_UPLOAD_DIR / filename
+        db_path = f"certificates/{filename}"
+    elif document_type == "governmentId":
+        save_path = GOVERNMENT_ID_UPLOAD_DIR / filename
+        db_path = f"government_ids/{filename}"
+    else:
+        save_path = LOGO_UPLOAD_DIR / filename
+        db_path = f"logos/{filename}"
+
+    with open(save_path, "wb") as buffer:
+        buffer.write(file_content)
+
+    # Update database
+    try:
+        users_collection.update_one(
+            {"_id": ObjectId(current_user.id)},
+            {"$set": {document_type: db_path}}
+        )
+    except PyMongoError as error:
+        # Cleanup file if DB update fails
+        if save_path.exists():
+            save_path.unlink()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update database.",
+        ) from error
+
+    return {
+        "message": "Document uploaded successfully.",
+        "documentPath": db_path,
+    }
+
+
+@app.get("/api/verification-documents/{document_type}/{filename}")
+def get_verification_document(
+    document_type: str,
+    filename: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    if document_type not in ["certificates", "government_ids", "logos"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document type.",
+        )
+
+    db_path = f"{document_type}/{filename}"
+
+    # Allow access if admin
+    is_authorized = False
+    if current_user.role == "admin":
+        is_authorized = True
+    else:
+        # Check if the file belongs to the current user
+        if document_type == "certificates":
+            field_name = "registrationCertificate"
+        elif document_type == "government_ids":
+            field_name = "governmentId"
+        else:
+            field_name = "organizationLogo"
+        
+        user_doc_path = getattr(current_user, field_name, None)
+        if user_doc_path == db_path:
+            is_authorized = True
+
+    if not is_authorized:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this document.",
+        )
+
+    if document_type == "certificates":
+        file_path = CERTIFICATE_UPLOAD_DIR / filename
+    elif document_type == "government_ids":
+        file_path = GOVERNMENT_ID_UPLOAD_DIR / filename
+    else:
+        file_path = LOGO_UPLOAD_DIR / filename
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    return FileResponse(path=file_path)
 
 
 @app.post(
