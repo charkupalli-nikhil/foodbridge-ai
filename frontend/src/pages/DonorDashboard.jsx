@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import API from "../api/axios";
-import "./Dashboard.css";
+import "./DonorDashboard.css";
+import NotificationBell from "../components/NotificationBell";
 
 function DonorDashboard() {
   const navigate = useNavigate();
@@ -292,7 +293,8 @@ function DonorDashboard() {
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", alignItems: "center" }}>
+            <NotificationBell />
             <button className="view-home-button" onClick={loadDashboardData}>
               Refresh Donations
             </button>
@@ -309,6 +311,17 @@ function DonorDashboard() {
           include AI priority prediction, confidence information and uploaded
           food images.
         </div>
+
+        {savedUser?.trustScore < 70 && (
+           <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '16px', borderRadius: '8px', marginBottom: '20px', color: '#991b1b' }}>
+             <strong>⚠️ Trust Score Warning:</strong> Your donor trust score has dropped to {savedUser.trustScore}/100 due to poor receiver feedback or duplicate image uploads. If it drops below 40, your account will be suspended.
+           </div>
+        )}
+        {savedUser?.trustScore >= 70 && (
+           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '16px', borderRadius: '8px', marginBottom: '20px', color: '#166534' }}>
+             <strong>🛡️ Trust Score: {savedUser.trustScore}/100</strong> - Excellent! Your high food quality and accurate listings are helping the community.
+           </div>
+        )}
 
         <section className="dashboard-statistics">
           <div className="statistic-card">

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "./Dashboard.css";
 import "./AdminDashboard.css";
+import NotificationBell from "../components/NotificationBell";
 
 import { API_BASE_URL } from "../config";
 
@@ -190,7 +191,7 @@ function AdminDashboard() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const authenticatedRequest = useCallback(
-    async (endpoint) => {
+    async (endpoint, options = {}) => {
       const token =
         localStorage.getItem("accessToken") ||
         localStorage.getItem("token") ||
@@ -202,11 +203,16 @@ function AdminDashboard() {
         throw new Error("Please login again to continue.");
       }
 
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const fetchOptions = {
+        ...options,
         headers: {
           Authorization: `Bearer ${token}`,
+          ...(options.body ? { "Content-Type": "application/json" } : {}),
+          ...options.headers,
         },
-      });
+      };
+
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
 
       if (response.status === 401) {
         clearSession();
@@ -394,7 +400,8 @@ function AdminDashboard() {
             </span>
           </div>
 
-          <div className="admin-header-actions">
+          <div className="admin-header-actions" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+            <NotificationBell />
             <button
               className="admin-refresh-button"
               type="button"

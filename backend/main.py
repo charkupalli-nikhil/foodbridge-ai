@@ -3,7 +3,7 @@ import os
 import shutil
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -31,6 +31,7 @@ from database import (
     donations_collection,
     initialise_database_indexes,
     users_collection,
+    notifications_collection,
 )
 from prediction import predict_food_priority
 from security import (
@@ -119,6 +120,10 @@ class UserPublic(BaseModel):
     verifiedBy: str | None = None
     rejectionReason: str | None = None
 
+    # Trust & Status
+    trustScore: int = 100
+    accountStatus: str = "active"
+
     # Common
     location: str
     contactNumber: str
@@ -141,6 +146,11 @@ class DonationCreate(BaseModel):
     packagingCondition: str = Field(min_length=2, max_length=300)
     foodImage: str | None = None
     packagingImage: str | None = None
+
+
+class DonationFeedback(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comments: str | None = None
 
 
 class Donation(BaseModel):
@@ -168,6 +178,17 @@ class Donation(BaseModel):
     acceptedByLocation: str | None = None
     acceptedAt: datetime | None = None
     collectedAt: datetime | None = None
+    feedback: DonationFeedback | None = None
+    matchScore: int | None = None
+
+
+class Notification(BaseModel):
+    id: str
+    userId: str
+    title: str
+    message: str
+    isRead: bool = False
+    createdAt: datetime
 
 
 class DonorStatistics(BaseModel):
@@ -294,35 +315,55 @@ def normalise_priority(priority: str | None) -> PriorityType:
     return "Medium"
 
 
-def document_to_user(document: dict) -> UserPublic:
+def document_to_user(document: dict[str, Any]) -> UserPublic:
     return UserPublic(
         id=str(document["_id"]),
         fullName=document["fullName"],
         email=document["email"],
         organisation=document["organisation"],
         role=document["role"],
-
         organizationType=document.get("organizationType"),
         description=document.get("description"),
         capacity=document.get("capacity"),
         operatingHours=document.get("operatingHours"),
         acceptedFoodTypes=document.get("acceptedFoodTypes", []),
-
-        verificationStatus=document.get(
-            "verificationStatus",
-            "verified" if document.get("role") == "donor" else "pending"
-        ),
+        verificationStatus=document.get("verificationStatus", "verified"),
         registrationCertificate=document.get("registrationCertificate"),
         governmentId=document.get("governmentId"),
         organizationLogo=document.get("organizationLogo"),
         verifiedAt=document.get("verifiedAt"),
         verifiedBy=document.get("verifiedBy"),
         rejectionReason=document.get("rejectionReason"),
-
+        trustScore=document.get("trustScore", 100),
+        accountStatus=document.get("accountStatus", "active"),
         location=document["location"],
         contactNumber=document["contactNumber"],
         createdAt=document["createdAt"],
     )
+
+
+def document_to_notification(document: dict[str, Any]) -> Notification:
+    return Notification(
+        id=str(document["_id"]),
+        userId=document["userId"],
+        title=document["title"],
+        message=document["message"],
+        isRead=document.get("isRead", False),
+        createdAt=document["createdAt"],
+    )
+
+
+def create_notification(user_id: str, title: str, message: str) -> None:
+    try:
+        notifications_collection.insert_one({
+            "userId": user_id,
+            "title": title,
+            "message": message,
+            "isRead": False,
+            "createdAt": datetime.now()
+        })
+    except Exception as e:
+        print(f"Failed to create notification: {e}")
 
 
 def document_to_donation(document: dict) -> Donation:
@@ -354,6 +395,7 @@ def document_to_donation(document: dict) -> Donation:
         acceptedByLocation=document.get("acceptedByLocation"),
         acceptedAt=document.get("acceptedAt"),
         collectedAt=document.get("collectedAt"),
+        feedback=document.get("feedback"),
     )
 
 
@@ -785,6 +827,11 @@ def register_user(registration_data: UserRegister):
 
         public_user = document_to_user(created_document)
 
+        if registration_data.role == "ngo":
+            admins = users_collection.find({"role": "admin"}, {"_id": 1})
+            for admin in admins:
+                create_notification(str(admin["_id"]), "New NGO Registration", f"{registration_data.organisation} has registered and is pending verification.")
+
         return AuthResponse(
             accessToken=create_access_token(
                 public_user.id,
@@ -827,6 +874,12 @@ def login_user(login_data: UserLogin):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password.",
+            )
+            
+        if user_document.get("accountStatus") == "suspended":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account has been suspended.",
             )
 
         if user_document["role"] != login_data.role:
@@ -903,6 +956,79 @@ def get_available_donations(
         ) from error
 
 
+@app.get("/api/donations/recommended", response_model=list[Donation])
+def get_recommended_donations(
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    require_verified_ngo(current_user)
+
+    try:
+        user_doc = users_collection.find_one({"_id": ObjectId(current_user.id)})
+        if not user_doc:
+            return []
+
+        ngo_capacity = user_doc.get("capacity")
+        accepted_food_types = user_doc.get("acceptedFoodTypes", [])
+        ngo_location = user_doc.get("location", "").lower()
+
+        documents = list(donations_collection.find({"status": "Active"}))
+        scored_donations = []
+
+        for doc in documents:
+            if ngo_capacity and doc.get("servings", 0) > ngo_capacity:
+                continue
+
+            score = 0
+            
+            # Food Type Match (+40)
+            if doc.get("category") in accepted_food_types:
+                score += 40
+
+            # Priority (+30 for High, +15 for Medium, +5 for Low)
+            priority = doc.get("priority", "Medium")
+            if priority == "High":
+                score += 30
+            elif priority == "Medium":
+                score += 15
+            else:
+                score += 5
+
+            # Location (+20) - basic keyword match
+            donor_location = doc.get("location", "").lower()
+            if ngo_location and (ngo_location in donor_location or donor_location in ngo_location):
+                score += 20
+            else:
+                ngo_words = set(ngo_location.replace(",", " ").split())
+                donor_words = set(donor_location.replace(",", " ").split())
+                if ngo_words & donor_words:
+                    score += 10
+
+            # Urgency (+10)
+            deadline = doc.get("pickupDeadline")
+            if deadline:
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                hours_remaining = (deadline - now).total_seconds() / 3600
+                if hours_remaining <= 2:
+                    score += 10
+                elif hours_remaining <= 6:
+                    score += 5
+
+            donation = document_to_donation(doc)
+            donation.matchScore = score
+            scored_donations.append((score, donation))
+
+        scored_donations.sort(key=lambda x: x[0], reverse=True)
+        return [donation for _, donation in scored_donations[:3]]
+
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load recommended donations.",
+        ) from error
+
+
 @app.get("/api/donations/my-pickups", response_model=list[Donation])
 def get_my_pickups(
     current_user: Annotated[UserPublic, Depends(get_current_user)],
@@ -934,6 +1060,12 @@ def create_donation(
 ):
     require_role(current_user, "donor")
 
+    if current_user.accountStatus == "suspended":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been suspended due to low trust score. You cannot create new donations.",
+        )
+
     if donation_data.pickupDeadline <= get_current_datetime_for(
         donation_data.pickupDeadline
     ):
@@ -948,6 +1080,25 @@ def create_donation(
     if donation_data.foodImage:
         from ml.image_analysis import analyze_food_image
         image_analysis_result = analyze_food_image(donation_data.foodImage)
+        
+        # Phase 3: Duplicate image detection
+        if image_analysis_result.get("imageHash"):
+            existing_duplicate = donations_collection.find_one({
+                "imageAnalysis.imageHash": image_analysis_result["imageHash"],
+                "status": {"$ne": "Cancelled"}
+            })
+            if existing_duplicate:
+                # Deduct trust score for duplicates
+                new_score = max(0, current_user.trustScore - 10)
+                new_status = "suspended" if new_score < 40 else "active"
+                users_collection.update_one(
+                    {"_id": ObjectId(current_user.id)},
+                    {"$set": {"trustScore": new_score, "accountStatus": new_status}}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Duplicate image detected. This exact image has been used in a previous donation.",
+                )
 
     donation_document = {
         **donation_data.model_dump(),
@@ -981,6 +1132,11 @@ def create_donation(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Donation was created but could not be retrieved.",
             )
+
+        if prediction_payload["priority"] == "High":
+            ngos = users_collection.find({"role": "ngo", "verificationStatus": "verified"}, {"_id": 1})
+            for ngo in ngos:
+                create_notification(str(ngo["_id"]), "High Priority Donation", f"New urgent donation available: {donation_data.foodName}")
 
         return document_to_donation(created_document)
 
@@ -1022,6 +1178,7 @@ def accept_donation(
         )
 
         if accepted_document is not None:
+            create_notification(accepted_document["donorUserId"], "Donation Accepted", f"Your donation '{accepted_document['foodName']}' was accepted by {current_user.organisation}.")
             return document_to_donation(accepted_document)
 
         existing_document = donations_collection.find_one(
@@ -1077,6 +1234,7 @@ def mark_donation_as_collected(
         )
 
         if updated_document is not None:
+            create_notification(updated_document["donorUserId"], "Collection Completed", f"{current_user.organisation} has collected '{updated_document['foodName']}'! Thank you.")
             return document_to_donation(updated_document)
 
         existing_document = donations_collection.find_one(
@@ -1451,4 +1609,106 @@ def reject_verification(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to reject verification.",
-        ) from error
+        ) from error
+
+
+@app.post(
+    "/api/donations/{donation_id}/feedback",
+    response_model=Donation,
+)
+def submit_donation_feedback(
+    donation_id: str,
+    feedback_data: DonationFeedback,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    require_verified_ngo(current_user)
+    object_id = validate_donation_id(donation_id)
+
+    try:
+        donation = donations_collection.find_one({
+            "_id": object_id,
+            "status": "Collected",
+            "acceptedByUserId": current_user.id
+        })
+        
+        if not donation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Donation not found, not collected by you, or not in Collected status."
+            )
+            
+        if donation.get("feedback"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Feedback has already been submitted for this donation."
+            )
+
+        updated_document = donations_collection.find_one_and_update(
+            {"_id": object_id},
+            {"$set": {"feedback": feedback_data.model_dump()}},
+            return_document=ReturnDocument.AFTER,
+        )
+
+        # Trust Score Adjustment
+        donor_id = donation["donorUserId"]
+        score_change = 0
+        if feedback_data.rating == 5:
+            score_change = 2
+        elif feedback_data.rating <= 2:
+            score_change = -5
+            
+        if score_change != 0:
+            donor = users_collection.find_one({"_id": ObjectId(donor_id)})
+            if donor:
+                new_score = max(0, min(100, donor.get("trustScore", 100) + score_change))
+                new_status = "suspended" if new_score < 40 else donor.get("accountStatus", "active")
+                users_collection.update_one(
+                    {"_id": ObjectId(donor_id)},
+                    {"$set": {"trustScore": new_score, "accountStatus": new_status}}
+                )
+
+        if updated_document is not None:
+            return document_to_donation(updated_document)
+        raise HTTPException(status_code=404, detail="Donation not found.")
+
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to submit feedback.",
+        ) from error
+
+
+@app.get("/api/notifications", response_model=list[Notification])
+def get_notifications(
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    try:
+        documents = notifications_collection.find(
+            {"userId": current_user.id, "isRead": False}
+        ).sort("createdAt", DESCENDING)
+        
+        return [document_to_notification(doc) for doc in documents]
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load notifications.",
+        ) from error
+
+
+@app.put("/api/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+):
+    if not ObjectId.is_valid(notification_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ID.")
+    try:
+        result = notifications_collection.update_one(
+            {"_id": ObjectId(notification_id), "userId": current_user.id},
+            {"$set": {"isRead": True}}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
+        return {"message": "Marked as read."}
+    except PyMongoError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Error marking read.") from error

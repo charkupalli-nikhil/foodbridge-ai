@@ -28,6 +28,7 @@ database = client[MONGODB_DATABASE]
 
 users_collection = database["users"]
 donations_collection = database["donations"]
+notifications_collection = database["notifications"]
 
 
 def check_database_connection() -> bool:
@@ -72,4 +73,9 @@ def initialise_database_indexes() -> None:
         expireAfterSeconds=0,
         partialFilterExpression={"status": "Active"},
         name="delete_expired_active_donations",
+    )
+
+    notifications_collection.create_index(
+        [("userId", ASCENDING), ("createdAt", DESCENDING)],
+        name="user_notifications_created_at",
     )

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import "./Dashboard.css";
-import "./NgoDashboard.css";
-
 import { API_BASE_URL } from "../config";
+import "./NgoDashboard.css";
+import NotificationBell from "../components/NotificationBell";
 
 const emptyStatistics = {
   availableDonations: 0,
@@ -181,6 +180,7 @@ function NgoDashboard() {
 
   const [ngo] = useState(getStoredUser);
   const [availableDonations, setAvailableDonations] = useState([]);
+  const [recommendedDonations, setRecommendedDonations] = useState([]);
   const [myPickups, setMyPickups] = useState([]);
   const [statistics, setStatistics] = useState(emptyStatistics);
   const [isLoading, setIsLoading] = useState(true);
@@ -231,15 +231,21 @@ function NgoDashboard() {
         return;
       }
 
-      const [availableResponse, pickupsResponse, statisticsResponse] =
+      const [availableResponse, recommendedResponse, pickupsResponse, statisticsResponse] =
         await Promise.all([
           authenticatedRequest("/donations/available"),
+          authenticatedRequest("/donations/recommended"),
           authenticatedRequest("/donations/my-pickups"),
           authenticatedRequest("/statistics/ngo"),
         ]);
 
       if (!availableResponse.ok) {
         const message = await readErrorMessage(availableResponse);
+        throw new Error(message);
+      }
+
+      if (!recommendedResponse.ok) {
+        const message = await readErrorMessage(recommendedResponse);
         throw new Error(message);
       }
 
@@ -254,10 +260,12 @@ function NgoDashboard() {
       }
 
       const availableData = await availableResponse.json();
+      const recommendedData = await recommendedResponse.json();
       const pickupData = await pickupsResponse.json();
       const statisticsData = await statisticsResponse.json();
 
       setAvailableDonations(availableData);
+      setRecommendedDonations(recommendedData);
       setMyPickups(pickupData);
       setStatistics(statisticsData);
     } catch (error) {
@@ -337,6 +345,33 @@ function NgoDashboard() {
     }
   };
 
+  const handleRateDonation = async (donationId, rating) => {
+    try {
+      setProcessingId(donationId);
+      setErrorMessage("");
+
+      const response = await authenticatedRequest(
+        `/donations/${donationId}/feedback`,
+        {
+          method: "POST",
+          body: JSON.stringify({ rating, comments: "Rated via NGO Dashboard" }),
+        }
+      );
+
+      if (!response.ok) {
+        const message = await readErrorMessage(response);
+        throw new Error(message);
+      }
+
+      showSuccessMessage("Feedback submitted! Donor trust score updated.");
+      await loadDashboardData();
+    } catch (error) {
+      setErrorMessage(error.message || "Unable to submit feedback.");
+    } finally {
+      setProcessingId("");
+    }
+  };
+
   const handleLogout = () => {
     clearSession();
   };
@@ -407,7 +442,8 @@ function NgoDashboard() {
             </div>
           </div>
 
-          <div className="ngo-header-actions">
+          <div className="ngo-header-actions" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+            <NotificationBell />
             <button
               className="refresh-donations-button"
               type="button"
@@ -482,6 +518,118 @@ function NgoDashboard() {
           </section>
         ) : (
         <section className="ngo-content-grid">
+          {recommendedDonations.length > 0 && (
+            <article className="ngo-panel" id="recommended-donations" style={{ border: '2px solid #8b5cf6', background: '#f5f3ff' }}>
+              <div className="dashboard-section-title">
+                <div>
+                  <p style={{ color: '#7c3aed', fontWeight: 'bold' }}>✨ SMART MATCHING</p>
+                  <h2 style={{ color: '#5b21b6' }}>Recommended For You</h2>
+                </div>
+                <span className="listing-count" style={{ background: '#7c3aed', color: 'white' }}>
+                  {recommendedDonations.length} Matches
+                </span>
+              </div>
+
+              <div className="ngo-donation-list">
+                {recommendedDonations.map((donation) => (
+                  <article className="ngo-donation-card" key={`rec-${donation.id}`} style={{ border: '1px solid #c4b5fd' }}>
+                    <div className="ngo-card-top">
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <h3 style={{ margin: 0 }}>{donation.foodName}</h3>
+                          {donation.matchScore && (
+                            <span style={{ background: '#8b5cf6', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                              {donation.matchScore}% Match
+                            </span>
+                          )}
+                        </div>
+                        <p>
+                          {donation.category} • {donation.donorOrganisation}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`priority-pill ${getPriorityClass(
+                          donation.priority
+                        )}`}
+                      >
+                        AI Priority: {donation.priority || "Medium"}
+                      </span>
+                    </div>
+
+                    <DonationImages donation={donation} />
+
+                    <div className="ngo-donation-details">
+                      <div>
+                        <span>Servings</span>
+                        <strong>{donation.servings}</strong>
+                      </div>
+
+                      <div>
+                        <span>Status</span>
+                        <strong className="active-status">
+                          {donation.status}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Prediction Method</span>
+                        <strong>
+                          {formatPredictionMethod(donation.predictionMethod)}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <p className="ngo-location">📍 {donation.location}</p>
+
+                    <p className="ngo-deadline">
+                      Pickup before: {formatDateTime(donation.pickupDeadline)}
+                    </p>
+
+                    {donation.predictionFeatures && (
+                      <p className="ngo-deadline">
+                        ML features used:{" "}
+                        {donation.predictionFeatures.preparation_age_minutes ??
+                          "N/A"}{" "}
+                        min prepared age •{" "}
+                        {donation.predictionFeatures.pickup_window_minutes ??
+                          "N/A"}{" "}
+                        min pickup window • Packaging score{" "}
+                        {donation.predictionFeatures.packaging_score ?? "N/A"}
+                      </p>
+                    )}
+
+                    {donation.imageAnalysis && (
+                      <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
+                        <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
+                          <span>
+                            <strong>Quality Assessment:</strong> Freshness indicator: {donation.imageAnalysis.freshnessIndicator} | Visual condition: {donation.imageAnalysis.visualCondition}
+                          </span>
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="ngo-packaging">
+                      <strong>Packaging:</strong> {donation.packagingCondition}
+                    </p>
+
+                    <button
+                      className="accept-donation-button"
+                      type="button"
+                      disabled={processingId === donation.id}
+                      onClick={() => handleAcceptDonation(donation.id)}
+                    >
+                      {processingId === donation.id
+                        ? "Accepting Pickup..."
+                        : "Accept Pickup Request"}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </article>
+          )}
+
           <article className="ngo-panel" id="available-donations">
             <div className="dashboard-section-title">
               <div>
@@ -542,13 +690,6 @@ function NgoDashboard() {
                       </div>
 
                       <div>
-                        <span>AI Confidence</span>
-                        <strong>
-                          {formatAiConfidence(donation.aiConfidence)}
-                        </strong>
-                      </div>
-
-                      <div>
                         <span>Prediction Method</span>
                         <strong>
                           {formatPredictionMethod(donation.predictionMethod)}
@@ -580,7 +721,7 @@ function NgoDashboard() {
                         <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
                           <span>
-                            <strong>AI Vision Analysis:</strong> Quality Score {Math.round(donation.imageAnalysis.qualityScore * 100)}%. {donation.imageAnalysis.notes}
+                            <strong>Quality Assessment:</strong> Freshness indicator: {donation.imageAnalysis.freshnessIndicator} | Visual condition: {donation.imageAnalysis.visualCondition}
                           </span>
                         </p>
                       </div>
@@ -653,11 +794,6 @@ function NgoDashboard() {
                     </div>
 
                     <div>
-                      <span>AI Confidence</span>
-                      <strong>{formatAiConfidence(donation.aiConfidence)}</strong>
-                    </div>
-
-                    <div>
                       <span>Prediction Method</span>
                       <strong>
                         {formatPredictionMethod(donation.predictionMethod)}
@@ -693,7 +829,7 @@ function NgoDashboard() {
                       <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
                         <span>
-                          <strong>AI Vision Analysis:</strong> Quality Score {Math.round(donation.imageAnalysis.qualityScore * 100)}%. {donation.imageAnalysis.notes}
+                          <strong>Quality Assessment:</strong> Freshness indicator: {donation.imageAnalysis.freshnessIndicator} | Visual condition: {donation.imageAnalysis.visualCondition}
                         </span>
                       </p>
                     </div>
@@ -716,6 +852,35 @@ function NgoDashboard() {
                         ? "Updating..."
                         : "Mark Collection Completed"}
                     </button>
+                  )}
+
+                  {donation.status === "Collected" && !donation.feedback && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <p style={{ margin: '0 0 10px 0', fontWeight: 'bold' }}>Rate Food Quality:</p>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <button
+                            key={star}
+                            onClick={() => handleRateDonation(donation.id, star)}
+                            disabled={processingId === donation.id}
+                            style={{ 
+                              padding: '6px 12px', 
+                              border: '1px solid #cbd5e1', 
+                              borderRadius: '4px',
+                              background: 'white',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {star} ⭐
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {donation.feedback && (
+                    <p style={{ color: '#16a34a', fontWeight: 'bold', marginTop: '12px' }}>
+                      ✓ Rated {donation.feedback.rating} stars
+                    </p>
                   )}
                 </article>
               ))}
