@@ -1,7 +1,19 @@
 import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import "../App.css";
 
 function Home() {
+  const [stats, setStats] = useState({ donations: 0, mealsSaved: 0, ngoPartners: 0 });
+
+  useEffect(() => {
+    axios.get("http://localhost:8000/api/public/stats")
+      .then(res => {
+        if (res.data) setStats(res.data);
+      })
+      .catch(err => console.error("Error fetching stats:", err));
+  }, []);
+
   const features = [
     {
       icon: "🍱",
@@ -108,17 +120,17 @@ function Home() {
 
             <div className="hero-stats" id="impact">
               <div>
-                <h3>0+</h3>
+                <h3>{stats.donations}+</h3>
                 <p>Donations</p>
               </div>
 
               <div>
-                <h3>0+</h3>
+                <h3>{stats.mealsSaved.toLocaleString()}+</h3>
                 <p>Meals Saved</p>
               </div>
 
               <div>
-                <h3>0+</h3>
+                <h3>{stats.ngoPartners}+</h3>
                 <p>NGO Partners</p>
               </div>
             </div>

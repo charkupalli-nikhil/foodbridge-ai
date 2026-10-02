@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from "recharts";
 import "./Dashboard.css";
 import "./AdminDashboard.css";
 import NotificationBell from "../components/NotificationBell";
@@ -500,6 +513,79 @@ function AdminDashboard() {
               <h2>{statistics.totalMealsRecovered}</h2>
             </div>
           </article>
+          
+          <article className="statistic-card">
+            <div className="stat-icon green">✅</div>
+            <div>
+              <p>Verified NGOs</p>
+              <h2>{statistics.verifiedNgos || 0}</h2>
+            </div>
+          </article>
+
+          <article className="statistic-card">
+            <div className="stat-icon orange">⏳</div>
+            <div>
+              <p>Pending NGOs</p>
+              <h2>{statistics.pendingNgos || 0}</h2>
+            </div>
+          </article>
+
+          <article className="statistic-card">
+            <div className="stat-icon red">⚠️</div>
+            <div>
+              <p>Suspended Users</p>
+              <h2>{statistics.suspendedDonors || 0}</h2>
+            </div>
+          </article>
+        </section>
+
+        <section className="analytics-section" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px', margin: '24px 0' }}>
+          {statistics.monthlyDonations && statistics.monthlyDonations.length > 0 && (
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+              <h3 style={{ color: '#1e293b', marginBottom: '20px' }}>Donations Per Month</h3>
+              <div style={{ height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={statistics.monthlyDonations}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                    <YAxis axisLine={false} tickLine={false} />
+                    <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                    <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={3} dot={{r: 4, fill: '#3b82f6'}} activeDot={{r: 6}} name="Donations" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {statistics.categoryBreakdown && statistics.categoryBreakdown.length > 0 && (
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+              <h3 style={{ color: '#1e293b', marginBottom: '20px' }}>Food Categories Breakdown</h3>
+              <div style={{ height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statistics.categoryBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      fill="#8884d8"
+                      paddingAngle={5}
+                      dataKey="count"
+                      nameKey="category"
+                      label
+                    >
+                      {statistics.categoryBreakdown.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'][index % 7]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="admin-content-grid">

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from "recharts";
 import { API_BASE_URL } from "../config";
+import "./Dashboard.css";
 import "./NgoDashboard.css";
 import NotificationBell from "../components/NotificationBell";
 
@@ -509,6 +518,34 @@ function NgoDashboard() {
           </article>
         </section>
 
+        {statistics.categoryBreakdown && statistics.categoryBreakdown.length > 0 && (
+          <section className="analytics-section" style={{ background: '#fff', padding: '24px', borderRadius: '12px', marginTop: '24px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+            <h3 style={{ color: '#1e293b', marginBottom: '8px' }}>Food Categories Handled</h3>
+            <div style={{ height: 300, marginTop: '20px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={statistics.categoryBreakdown}
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={100}
+                    fill="#8884d8"
+                    dataKey="count"
+                    nameKey="category"
+                    label
+                  >
+                    {statistics.categoryBreakdown.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'][index % 7]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+        )}
+
         {ngo?.verificationStatus !== "verified" ? (
           <section style={{background: '#fffbeb', padding: '40px 20px', borderRadius: '12px', border: '1px solid #fde68a', textAlign: 'center', marginTop: '20px'}}>
             <h2 style={{color: '#92400e', marginBottom: '12px', fontSize: '1.5rem'}}>Organization Under Verification</h2>
@@ -580,7 +617,14 @@ function NgoDashboard() {
                       </div>
                     </div>
 
-                    <p className="ngo-location">📍 {donation.location}</p>
+                    <p className="ngo-location">
+                      📍 {donation.location}
+                      {donation.distanceKm !== undefined && donation.distanceKm !== null && (
+                        <span style={{ color: '#059669', fontWeight: 'bold', marginLeft: '6px' }}>
+                          ({donation.distanceKm} km away)
+                        </span>
+                      )}
+                    </p>
 
                     <p className="ngo-deadline">
                       Pickup before: {formatDateTime(donation.pickupDeadline)}
@@ -697,7 +741,14 @@ function NgoDashboard() {
                       </div>
                     </div>
 
-                    <p className="ngo-location">📍 {donation.location}</p>
+                    <p className="ngo-location">
+                      📍 {donation.location}
+                      {donation.distanceKm !== undefined && donation.distanceKm !== null && (
+                        <span style={{ color: '#059669', fontWeight: 'bold', marginLeft: '6px' }}>
+                          ({donation.distanceKm} km away)
+                        </span>
+                      )}
+                    </p>
 
                     <p className="ngo-deadline">
                       Pickup before: {formatDateTime(donation.pickupDeadline)}
@@ -801,7 +852,14 @@ function NgoDashboard() {
                     </div>
                   </div>
 
-                  <p className="ngo-location">📍 {donation.location}</p>
+                  <p className="ngo-location">
+                    📍 {donation.location}
+                    {donation.distanceKm !== undefined && donation.distanceKm !== null && (
+                      <span style={{ color: '#059669', fontWeight: 'bold', marginLeft: '6px' }}>
+                        ({donation.distanceKm} km away)
+                      </span>
+                    )}
+                  </p>
 
                   <p className="ngo-deadline">
                     Pickup before: {formatDateTime(donation.pickupDeadline)}

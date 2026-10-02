@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+} from "recharts";
 import API from "../api/axios";
-import "./DonorDashboard.css";
+import "./Dashboard.css";
 import NotificationBell from "../components/NotificationBell";
 
 function DonorDashboard() {
@@ -364,6 +373,23 @@ function DonorDashboard() {
             </div>
           </div>
         </section>
+
+        {statistics.monthlyDonations && statistics.monthlyDonations.length > 0 && (
+          <section className="analytics-section" style={{ background: '#fff', padding: '24px', borderRadius: '12px', marginTop: '24px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+            <h3 style={{ color: '#1e293b' }}>Monthly Donation Impact</h3>
+            <div style={{ height: 300, marginTop: '20px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={statistics.monthlyDonations}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                  <YAxis axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                  <Line type="monotone" dataKey="count" stroke="#16a34a" strokeWidth={3} dot={{r: 4, fill: '#16a34a'}} activeDot={{r: 6}} name="Donations" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+        )}
 
         <section className="dashboard-content-grid">
           <div className="donation-form-container" id="post-donation">

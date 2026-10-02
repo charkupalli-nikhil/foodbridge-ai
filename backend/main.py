@@ -1,13 +1,40 @@
 import uuid
 import os
 import shutil
-import uuid
+import math
+import requests
+import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+GEOCODE_CACHE = {}
 
+def get_coordinates(location_str: str):
+    if not location_str or len(location_str) < 3: return None
+    loc_lower = location_str.lower().strip()
+    if loc_lower in GEOCODE_CACHE: return GEOCODE_CACHE[loc_lower]
+    
+    try:
+        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(location_str)}&format=json&limit=1"
+        res = requests.get(url, headers={'User-Agent': 'FoodBridgeAI/1.0'}, timeout=3)
+        if res.status_code == 200 and len(res.json()) > 0:
+            data = res.json()[0]
+            coords = (float(data['lat']), float(data['lon']))
+            GEOCODE_CACHE[loc_lower] = coords
+            return coords
+    except Exception:
+        pass
+    return None
+
+def calculate_haversine_distance(lat1, lon1, lat2, lon2):
+    R = 6371.0 # Earth radius in km
+    dLat = math.radians(lat2 - lat1)
+    dLon = math.radians(lon2 - lon1)
+    a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dLon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
 from bson import ObjectId
 from fastapi import (
     Depends,
@@ -180,6 +207,13 @@ class Donation(BaseModel):
     collectedAt: datetime | None = None
     feedback: DonationFeedback | None = None
     matchScore: int | None = None
+    distanceKm: float | None = None
+
+
+class PublicStats(BaseModel):
+    donations: int
+    mealsSaved: int
+    ngoPartners: int
 
 
 class Notification(BaseModel):
@@ -191,12 +225,21 @@ class Notification(BaseModel):
     createdAt: datetime
 
 
+class MonthlyDonation(BaseModel):
+    month: str
+    count: int
+
+class CategoryCount(BaseModel):
+    category: str
+    count: int
+
 class DonorStatistics(BaseModel):
     activeDonations: int
     acceptedPickups: int
     completedPickups: int
     highPriorityDonations: int
     mealsSaved: int
+    monthlyDonations: list[MonthlyDonation] = []
 
 
 class NgoStatistics(BaseModel):
@@ -205,6 +248,7 @@ class NgoStatistics(BaseModel):
     completedPickups: int
     highPriorityAvailable: int
     mealsCollected: int
+    categoryBreakdown: list[CategoryCount] = []
 
 
 class AdminStatistics(BaseModel):
@@ -216,6 +260,11 @@ class AdminStatistics(BaseModel):
     acceptedPickups: int
     completedPickups: int
     totalMealsRecovered: int
+    verifiedNgos: int = 0
+    pendingNgos: int = 0
+    suspendedDonors: int = 0
+    monthlyDonations: list[MonthlyDonation] = []
+    categoryBreakdown: list[CategoryCount] = []
 
 
 @asynccontextmanager
@@ -396,6 +445,7 @@ def document_to_donation(document: dict) -> Donation:
         acceptedAt=document.get("acceptedAt"),
         collectedAt=document.get("collectedAt"),
         feedback=document.get("feedback"),
+        distanceKm=document.get("distanceKm"),
     )
 
 
@@ -545,6 +595,20 @@ def read_root():
         "aiPriorityPrediction": "enabled",
         "imageUpload": "enabled",
     }
+
+
+@app.get("/api/public/stats", response_model=PublicStats)
+def get_public_stats():
+    total_donations = donations_collection.count_documents({})
+    completed = donations_collection.find({"status": "Collected"})
+    meals_saved = sum(doc.get("servings", 0) for doc in completed)
+    ngo_partners = users_collection.count_documents({"role": "ngo", "verificationStatus": "verified"})
+    
+    return PublicStats(
+        donations=total_donations,
+        mealsSaved=meals_saved,
+        ngoPartners=ngo_partners,
+    )
 
 
 @app.get("/api/health")
@@ -969,7 +1033,8 @@ def get_recommended_donations(
 
         ngo_capacity = user_doc.get("capacity")
         accepted_food_types = user_doc.get("acceptedFoodTypes", [])
-        ngo_location = user_doc.get("location", "").lower()
+        ngo_location = user_doc.get("location", "")
+        ngo_coords = get_coordinates(ngo_location)
 
         documents = list(donations_collection.find({"status": "Active"}))
         scored_donations = []
@@ -993,15 +1058,34 @@ def get_recommended_donations(
             else:
                 score += 5
 
-            # Location (+20) - basic keyword match
-            donor_location = doc.get("location", "").lower()
-            if ngo_location and (ngo_location in donor_location or donor_location in ngo_location):
-                score += 20
-            else:
-                ngo_words = set(ngo_location.replace(",", " ").split())
-                donor_words = set(donor_location.replace(",", " ").split())
-                if ngo_words & donor_words:
+            # Location (+20) - Real Geospatial matching using OpenStreetMap API
+            donor_location = doc.get("location", "")
+            donor_coords = get_coordinates(donor_location)
+            
+            if ngo_coords and donor_coords:
+                distance_km = calculate_haversine_distance(ngo_coords[0], ngo_coords[1], donor_coords[0], donor_coords[1])
+                doc["distanceKm"] = round(distance_km, 1)
+                
+                # Assign points based on physical distance (closer = better)
+                if distance_km <= 5.0:
+                    score += 20
+                elif distance_km <= 15.0:
+                    score += 15
+                elif distance_km <= 30.0:
                     score += 10
+                else:
+                    score += 5
+            else:
+                # Fallback to legacy text matching if geocoding fails
+                donor_loc_lower = donor_location.lower()
+                ngo_loc_lower = ngo_location.lower()
+                if ngo_loc_lower and (ngo_loc_lower in donor_loc_lower or donor_loc_lower in ngo_loc_lower):
+                    score += 20
+                else:
+                    ngo_words = set(ngo_loc_lower.replace(",", " ").split())
+                    donor_words = set(donor_loc_lower.replace(",", " ").split())
+                    if ngo_words & donor_words:
+                        score += 10
 
             # Urgency (+10)
             deadline = doc.get("pickupDeadline")
@@ -1316,12 +1400,24 @@ def get_donor_statistics(
             else 0
         )
 
+        monthly_pipeline = [
+            {"$match": base_filter},
+            {"$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m", "date": "$createdAt"}},
+                "count": {"$sum": 1}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+        monthly_results = list(donations_collection.aggregate(monthly_pipeline))
+        monthly_donations = [{"month": res["_id"] or "Unknown", "count": res["count"]} for res in monthly_results]
+
         return DonorStatistics(
             activeDonations=active_donations,
             acceptedPickups=accepted_pickups,
             completedPickups=completed_pickups,
             highPriorityDonations=high_priority_donations,
             mealsSaved=meals_saved,
+            monthlyDonations=monthly_donations,
         )
 
     except PyMongoError as error:
@@ -1390,12 +1486,23 @@ def get_ngo_statistics(
             else 0
         )
 
+        category_pipeline = [
+            {"$match": assigned_filter},
+            {"$group": {
+                "_id": "$category",
+                "count": {"$sum": 1}
+            }}
+        ]
+        category_results = list(donations_collection.aggregate(category_pipeline))
+        category_breakdown = [{"category": res["_id"] or "Other", "count": res["count"]} for res in category_results]
+
         return NgoStatistics(
             availableDonations=available_donations,
             acceptedPickups=accepted_pickups,
             completedPickups=completed_pickups,
             highPriorityAvailable=high_priority_available,
             mealsCollected=meals_collected,
+            categoryBreakdown=category_breakdown,
         )
 
     except PyMongoError as error:
@@ -1447,6 +1554,29 @@ def get_admin_statistics(
             else 0
         )
 
+        verified_ngos = users_collection.count_documents({"role": "ngo", "verificationStatus": "verified"})
+        pending_ngos = users_collection.count_documents({"role": "ngo", "verificationStatus": "pending"})
+        suspended_donors = users_collection.count_documents({"role": "donor", "accountStatus": "suspended"})
+        
+        monthly_pipeline = [
+            {"$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m", "date": "$createdAt"}},
+                "count": {"$sum": 1}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+        monthly_results = list(donations_collection.aggregate(monthly_pipeline))
+        monthly_donations = [{"month": res["_id"] or "Unknown", "count": res["count"]} for res in monthly_results]
+        
+        category_pipeline = [
+            {"$group": {
+                "_id": "$category",
+                "count": {"$sum": 1}
+            }}
+        ]
+        category_results = list(donations_collection.aggregate(category_pipeline))
+        category_breakdown = [{"category": res["_id"] or "Other", "count": res["count"]} for res in category_results]
+
         return AdminStatistics(
             totalUsers=total_users,
             totalDonors=total_donors,
@@ -1456,6 +1586,11 @@ def get_admin_statistics(
             acceptedPickups=accepted_pickups,
             completedPickups=completed_pickups,
             totalMealsRecovered=total_meals_recovered,
+            verifiedNgos=verified_ngos,
+            pendingNgos=pending_ngos,
+            suspendedDonors=suspended_donors,
+            monthlyDonations=monthly_donations,
+            categoryBreakdown=category_breakdown,
         )
 
     except PyMongoError as error:

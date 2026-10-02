@@ -1,0 +1,580 @@
+🍃 FoodBridge AI — Complete Building Roadmap
+🟢 PHASE 1 — Core Food Donation Platform ✅ COMPLETED
+1. Authentication & User Management
+Donor registration
+Receiver Organization registration
+Admin login
+JWT authentication
+Role-based access control
+Login/logout
+User profile data
+2. Donation Management
+Create food donation
+Food details
+Number of servings
+Preparation time
+Pickup deadline
+Location
+Packaging condition
+Food image upload
+Packaging image upload
+3. Donation Workflow
+Donor Creates Donation
+        ↓
+Available for Receivers
+        ↓
+Receiver Accepts Donation
+        ↓
+Food Pickup
+        ↓
+Collection Completed
+4. Dashboards
+Donor Dashboard
+Receiver Organization Dashboard
+Admin Dashboard
+Statistics and impact tracking
+5. AI Priority Prediction
+Priority prediction
+AI confidence
+Prediction method
+Prediction features
+🟡 PHASE 2 — Trust, Verification & Security 🔄 CURRENT PHASE
+
+This phase makes FoodBridge AI more realistic and secure.
+
+Step 1 ✅ Verification Data Structure
+
+Already completed:
+
+verificationStatus
+registrationCertificate
+governmentId
+organizationLogo
+verifiedAt
+verifiedBy
+Step 2 ✅ Registration Status Logic
+
+Current logic:
+
+Donor
+Automatically Verified
+Receiver Organization
+Pending Verification
+Step 3 ✅ Upload Infrastructure
+
+Current structure:
+
+uploads/
+├── food/
+├── packaging/
+
+We will extend this.
+
+Step 4 🔄 Receiver Organization Document Upload
+Documents
+Registration Certificate
+Government ID
+Organization Logo
+
+New structure:
+
+uploads/
+├── food/
+├── packaging/
+└── verification/
+    ├── certificates/
+    ├── government_ids/
+    └── logos/
+
+Backend features:
+
+Secure file upload
+File type validation
+Unique filenames
+Store file paths in MongoDB
+Update Receiver Organization profile
+Step 5 — Receiver Organization Verification Page
+
+Create a page such as:
+
+ReceiverVerification.jsx
+
+The Receiver Organization can:
+
+See verification status
+Upload documents
+Replace documents before approval
+See pending/approved/rejected status
+
+Example:
+
+Verification Status: 🟡 Pending
+
+✓ Registration Certificate Uploaded
+✓ Government ID Uploaded
+✓ Organization Logo Uploaded
+
+Your documents are being reviewed by the administrator.
+Step 6 — Admin Verification System
+
+Admin dashboard will show:
+
+Pending Receiver Organizations
+Organization Name
+Organization Type
+Location
+Registration Certificate
+Government ID
+Logo
+Verification Status
+
+Admin actions:
+
+👁 View documents
+✅ Approve
+❌ Reject
+📝 Add rejection reason
+
+When approved:
+
+verificationStatus = "verified"
+verifiedAt = current datetime
+verifiedBy = admin ID
+Step 7 — Access Restrictions
+
+Only verified Receiver Organizations can:
+
+View available donation details fully
+Accept donations
+Mark collection completed
+
+Pending organizations will see:
+
+"Your organization is currently under verification. Please wait for administrator approval."
+
+🟠 PHASE 3 — Smart Donation Trust & Anti-Fake System
+
+This phase is based on the important feature you suggested.
+
+Step 1 — Live Camera Capture 📷
+
+Donors will primarily capture food images directly from their device camera.
+
+Store:
+
+Capture timestamp
+Image source
+Location (with permission)
+
+Example:
+
+imageSource: "camera"
+capturedAt: "2026-09-10"
+Step 2 — Gallery Upload Support 🖼️
+
+Gallery upload remains available as a fallback.
+
+But the system marks it:
+
+imageSource: "gallery"
+trustLevel: "lower"
+
+Receiver Organizations can see:
+
+📷 Live Camera Image
+
+or
+
+🖼 Gallery Uploaded Image
+Step 3 — Image Duplicate Detection
+
+Generate an image fingerprint/hash.
+
+Compare uploaded images with previous donations.
+
+Detect:
+
+Same image uploaded repeatedly
+Nearly identical images
+
+Suspicious donations can be flagged.
+
+Step 4 — Timestamp Verification
+
+Compare:
+
+Donation Creation Time
+        VS
+Photo Capture Time
+
+If the image is very old:
+
+⚠ Suspicious Image
+Step 5 — Location Verification
+
+With user permission:
+
+Photo Location
+        ↓
+Compare
+        ↓
+Donation Location
+
+Large location differences can generate a warning.
+
+Step 6 — Receiver Feedback ⭐
+
+After collection, the Receiver Organization gives feedback.
+
+Example:
+
+Food Quality
+
+⭐ ⭐ ⭐ ⭐ ⭐
+
+Did the food match the image?
+Yes / No
+Was the food safe?
+Yes / No
+Did the packaging match?
+Yes / No
+Comment
+Optional feedback
+Step 7 — Donor Trust Score 🛡️
+
+Each donor gets a trust score.
+
+Example:
+
+Trust Score: 100
+
+Good feedback:
+
++ Trust Score
+
+Bad feedback:
+
+- Trust Score
+Step 8 — Warning & Ban System 🚨
+
+Recommended workflow:
+
+First verified bad feedback
+⚠ Warning
+Three bad feedbacks
+🚫 Account Suspended
+Five verified bad feedbacks
+🔴 Permanently Banned
+
+However, the admin should be able to review suspicious feedback to avoid unfair automatic bans.
+
+🔵 PHASE 4 — AI & Computer Vision Enhancement
+
+This is where we strengthen the AI component for your final-year project.
+
+Step 1 — Food Image Preprocessing
+
+Using:
+
+OpenCV
+Python
+
+Tasks:
+
+Resize images
+Normalize images
+Improve image quality
+Prepare images for ML models
+Step 2 — Food Classification
+
+AI can identify:
+
+Food category
+Cooked food
+Fruits
+Vegetables
+Packaged food
+Step 3 — Food Quality Assessment
+
+The AI module can estimate:
+
+Fresh
+Moderate
+Suspicious
+Unsafe
+
+⚠️ Important: The system should be presented as an AI-assisted screening tool, not as a medical or laboratory certification of food safety.
+
+Step 4 — Packaging Quality Detection
+
+Computer vision checks visible conditions such as:
+
+Proper packaging
+Damaged packaging
+Open containers
+Visible leakage
+Step 5 — AI Decision Engine
+
+Combine multiple inputs:
+
+Preparation Time
+       +
+Pickup Deadline
+       +
+Packaging Condition
+       +
+Image Analysis
+       +
+Trust Score
+       ↓
+AI Priority Score
+
+Output:
+
+HIGH PRIORITY
+MEDIUM PRIORITY
+LOW PRIORITY
+🟣 PHASE 5 — Smart Matching & Location System
+Step 1 — Location-Based Matching 📍
+
+Match:
+
+Donor
+   ↓
+Nearby Verified Receiver Organizations
+
+Consider:
+
+Distance
+Receiver capacity
+Accepted food types
+Operating hours
+Step 2 — Smart Matching Algorithm 🤖
+
+The system ranks suitable receivers.
+
+Example:
+
+Receiver A — 2 km — Score 95
+Receiver B — 5 km — Score 82
+Receiver C — 8 km — Score 70
+
+Matching factors:
+
+Distance
+Food urgency
+Organization capacity
+Food type compatibility
+Receiver availability
+Step 3 — Map Integration 🗺️
+
+Potentially add:
+
+Donor location
+Receiver location
+Distance calculation
+Pickup route
+
+This can be implemented later depending on time and API availability.
+
+🔴 PHASE 6 — Notification System
+
+Users receive updates for important events.
+
+Donor
+Your donation has been accepted.
+Receiver
+A high-priority donation is available nearby.
+Admin
+A new Receiver Organization requires verification.
+
+Possible implementation:
+
+In-app notifications first
+Email notifications later
+🟤 PHASE 7 — Impact Analytics & Reporting
+
+Improve your existing dashboards.
+
+Global Impact Metrics
+🍽 Meals Redistributed
+♻ Food Waste Reduced
+🏢 Active Receiver Organizations
+🤝 Successful Donations
+Admin Analytics
+Donations per month
+Food categories
+High-priority donations
+Successful pickups
+Suspended donors
+Verified organizations
+
+A good place for a chart:
+
+FoodBridge AI donation growth
+
+Example monthly donation trend for the analytics dashboard.
+
+0
+20
+40
+60
+80
+Jan
+Feb
+Mar
+Apr
+May
+Jun
+⚫ PHASE 8 — Database Migration & Production Data Design
+
+Since your faculty and guides are suggesting SQL, this phase is important.
+
+Recommended final database approach
+Option A — Continue MongoDB
+
+Simpler because your current backend already works.
+
+Option B — Migrate to MySQL ⭐ Recommended for academic evaluation
+
+Tables could include:
+
+Users
+ReceiverOrganizations
+Donations
+Pickups
+Feedback
+VerificationDocuments
+Notifications
+TrustScores
+AdminActions
+
+For your final-year project, MySQL gives you stronger material for:
+
+ER Diagram
+Normalization
+Relationships
+Foreign Keys
+SQL Queries
+Database viva questions
+My recommendation
+
+Before the project becomes significantly larger, we should make a final decision about MongoDB vs MySQL.
+
+If your faculty strongly expects SQL, we should migrate before building too many more features.
+
+🟢 PHASE 9 — UI/UX & Production Polish
+
+Improve:
+
+Mobile responsiveness
+Loading states
+Error handling
+Empty states
+Image previews
+Confirmation dialogs
+Better navigation
+Accessibility
+🚀 PHASE 10 — Deployment & Final Application
+Frontend
+
+Deploy React application using:
+
+Vercel
+Backend
+
+Deploy FastAPI using:
+
+Render / Railway / another suitable hosting platform
+Database
+
+Deploy:
+
+MongoDB Atlas
+
+or
+
+MySQL cloud database
+🧪 PHASE 11 — Testing & Quality Assurance
+
+Test:
+
+Authentication
+Invalid login
+Expired JWT
+Unauthorized access
+Donation Workflow
+Create donation
+Accept donation
+Complete collection
+Verification
+Pending organization restrictions
+Admin approval
+Rejection handling
+Trust System
+Bad feedback
+Suspension
+Admin review
+AI
+Invalid images
+Prediction failures
+Fallback logic
+📚 PHASE 12 — Final-Year Project Documentation & Viva
+
+Prepare:
+
+Technical Documentation
+Problem Statement
+Objectives
+Literature Survey
+System Architecture
+Methodology
+Database Design
+ER Diagram (especially if SQL)
+DFD
+UML Diagrams
+AI Model Description
+Testing
+Final Demo Flow
+
+The ideal demonstration:
+
+1. Register Receiver Organization
+          ↓
+2. Upload Verification Documents
+          ↓
+3. Admin Approves Organization
+          ↓
+4. Donor Captures Live Food Image
+          ↓
+5. AI Analyses Donation
+          ↓
+6. Verified Receiver Accepts Donation
+          ↓
+7. Collection Completed
+          ↓
+8. Receiver Gives Feedback
+          ↓
+9. Trust Score Updates
+          ↓
+10. Dashboard Shows Impact
+
+Goal
+Implement Access Restrictions (Phase 2, Step 7) to ensure only verified Receiver Organizations (NGOs) can access sensitive functionality, such as viewing complete donation details, accepting donations, and marking collections as completed. Unverified (pending) organizations will see restricted views.
+
+
+
+PUSH COMMANDS
+
+git add .
+git commit -m "feat: complete receiver verification upload and status page"
+git push
+
+
+RUN COMMANDS
+cd backend
+python -m uvicorn main:app --reload
+
+cd frontend
+npm run dev
+
