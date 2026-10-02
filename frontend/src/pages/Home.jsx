@@ -1,13 +1,14 @@
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { API_BASE_URL } from "../config";
 import "../App.css";
 
 function Home() {
   const [stats, setStats] = useState({ donations: 0, mealsSaved: 0, ngoPartners: 0 });
 
   useEffect(() => {
-    axios.get("http://localhost:8000/api/public/stats")
+    axios.get(`${API_BASE_URL}/public/stats`)
       .then(res => {
         if (res.data) setStats(res.data);
       })
