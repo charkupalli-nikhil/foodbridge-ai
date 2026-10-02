@@ -608,13 +608,6 @@ function NgoDashboard() {
                           {donation.status}
                         </strong>
                       </div>
-
-                      <div>
-                        <span>Prediction Method</span>
-                        <strong>
-                          {formatPredictionMethod(donation.predictionMethod)}
-                        </strong>
-                      </div>
                     </div>
 
                     <p className="ngo-location">
@@ -629,19 +622,6 @@ function NgoDashboard() {
                     <p className="ngo-deadline">
                       Pickup before: {formatDateTime(donation.pickupDeadline)}
                     </p>
-
-                    {donation.predictionFeatures && (
-                      <p className="ngo-deadline">
-                        ML features used:{" "}
-                        {donation.predictionFeatures.preparation_age_minutes ??
-                          "N/A"}{" "}
-                        min prepared age •{" "}
-                        {donation.predictionFeatures.pickup_window_minutes ??
-                          "N/A"}{" "}
-                        min pickup window • Packaging score{" "}
-                        {donation.predictionFeatures.packaging_score ?? "N/A"}
-                      </p>
-                    )}
 
                     {donation.imageAnalysis && (
                       <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
@@ -732,13 +712,6 @@ function NgoDashboard() {
                           {donation.status}
                         </strong>
                       </div>
-
-                      <div>
-                        <span>Prediction Method</span>
-                        <strong>
-                          {formatPredictionMethod(donation.predictionMethod)}
-                        </strong>
-                      </div>
                     </div>
 
                     <p className="ngo-location">
@@ -753,19 +726,6 @@ function NgoDashboard() {
                     <p className="ngo-deadline">
                       Pickup before: {formatDateTime(donation.pickupDeadline)}
                     </p>
-
-                    {donation.predictionFeatures && (
-                      <p className="ngo-deadline">
-                        ML features used:{" "}
-                        {donation.predictionFeatures.preparation_age_minutes ??
-                          "N/A"}{" "}
-                        min prepared age •{" "}
-                        {donation.predictionFeatures.pickup_window_minutes ??
-                          "N/A"}{" "}
-                        min pickup window • Packaging score{" "}
-                        {donation.predictionFeatures.packaging_score ?? "N/A"}
-                      </p>
-                    )}
 
                     {donation.imageAnalysis && (
                       <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
@@ -843,13 +803,6 @@ function NgoDashboard() {
                       <span>AI Priority</span>
                       <strong>{donation.priority || "Medium"}</strong>
                     </div>
-
-                    <div>
-                      <span>Prediction Method</span>
-                      <strong>
-                        {formatPredictionMethod(donation.predictionMethod)}
-                      </strong>
-                    </div>
                   </div>
 
                   <p className="ngo-location">
@@ -868,19 +821,6 @@ function NgoDashboard() {
                   <p className="ngo-packaging">
                     <strong>Packaging:</strong> {donation.packagingCondition}
                   </p>
-
-                  {donation.predictionFeatures && (
-                    <p className="ngo-deadline">
-                      ML features used:{" "}
-                      {donation.predictionFeatures.preparation_age_minutes ??
-                        "N/A"}{" "}
-                      min prepared age •{" "}
-                      {donation.predictionFeatures.pickup_window_minutes ??
-                        "N/A"}{" "}
-                      min pickup window • Packaging score{" "}
-                      {donation.predictionFeatures.packaging_score ?? "N/A"}
-                    </p>
-                  )}
 
                   {donation.imageAnalysis && (
                     <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>

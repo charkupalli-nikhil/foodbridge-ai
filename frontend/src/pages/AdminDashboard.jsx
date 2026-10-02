@@ -825,13 +825,6 @@ function AdminDashboard() {
                           {formatAiConfidence(donation.aiConfidence)}
                         </strong>
                       </div>
-
-                      <div>
-                        <span>Prediction Method</span>
-                        <strong>
-                          {formatPredictionMethod(donation.predictionMethod)}
-                        </strong>
-                      </div>
                     </div>
 
                     {donation.predictionFeatures && (
