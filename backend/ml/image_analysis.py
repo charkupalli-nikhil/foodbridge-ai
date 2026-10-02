@@ -37,10 +37,12 @@ def analyze_food_image(image_data: str) -> dict:
         image_bytes = base64.b64decode(image_data)
         
         prompt = """
-        Analyze this food image and return a JSON object with exactly these keys:
-        - "isSpoiled": (boolean) true if the food looks spoiled, rotten, or unsafe to eat, false otherwise.
-        - "freshnessIndicator": (string) "Acceptable" if it looks okay, "Review Needed" if spoiled.
-        - "visualCondition": (string) "Good" if packaging/food is intact, "Issues Detected" if there are visible problems.
+        Analyze this image. First, explicitly check if the image contains any real food, meals, or food packaging.
+        If the image is completely unrelated (e.g. a laptop, a keyboard, random objects, just a blank wall), you MUST mark it as Invalid.
+        Return a JSON object with exactly these keys:
+        - "isSpoiled": (boolean) true if the food looks spoiled, rotten, or unsafe to eat.
+        - "freshnessIndicator": (string) "Invalid Image - Not Food" if there is no food in the image. "Acceptable" if it looks okay, "Review Needed" if spoiled.
+        - "visualCondition": (string) "Rejected" if there is no food in the image. "Good" if packaging/food is intact, "Issues Detected" if there are visible problems.
         
         Do not include markdown backticks like ```json in your response, just the raw JSON object.
         """
