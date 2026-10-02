@@ -244,7 +244,17 @@ function Login() {
                 <span>Remember me</span>
               </label>
 
-              <button className="forgot-button" type="button">
+              <button 
+                className="forgot-button" 
+                type="button"
+                onClick={() => {
+                  if(!formData.email) {
+                    alert("Please enter your email address first.");
+                  } else {
+                    alert(`A password reset link has been sent to ${formData.email}`);
+                  }
+                }}
+              >
                 Forgot Password?
               </button>
             </div>
