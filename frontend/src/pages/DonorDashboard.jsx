@@ -12,6 +12,7 @@ import {
 import API from "../api/axios";
 import "./Dashboard.css";
 import NotificationBell from "../components/NotificationBell";
+import CameraCaptureModal from "../components/CameraCaptureModal";
 
 function DonorDashboard() {
   const navigate = useNavigate();
@@ -42,6 +43,24 @@ function DonorDashboard() {
   const [packagingImageFile, setPackagingImageFile] = useState(null);
   const [foodImagePreview, setFoodImagePreview] = useState("");
   const [packagingImagePreview, setPackagingImagePreview] = useState("");
+
+  // Live camera capture states
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [captureToken, setCaptureToken] = useState("");
+  const [captureCoords, setCaptureCoords] = useState({ lat: null, lng: null });
+  const [pickupCoords, setPickupCoords] = useState({ lat: null, lng: null });
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+
+  const [verificationState, setVerificationState] = useState({
+    status: "idle", // "idle" | "verifying" | "accepted" | "rejected" | "unverified"
+    verdict: "",
+    confidence: null,
+    detectedFood: "",
+    reason: "",
+    fssaiDisclaimer: "",
+    imageOriginality: null,
+    originalityReasons: [],
+  });
 
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -100,18 +119,166 @@ function DonorDashboard() {
       [name]: value,
     }));
   };
+  const handleOpenCameraModal = async () => {
+    try {
+      const res = await API.post("/donations/capture-session");
+      if (res.data?.captureToken) {
+        setCaptureToken(res.data.captureToken);
+      }
+    } catch (err) {
+      console.warn("[Camera Session] Could not obtain capture token:", err);
+    }
+    setIsCameraModalOpen(true);
+  };
+
+  const verifyAndSetFoodImage = async (file, captureMethod = "live_camera", meta = {}) => {
+    setFoodImageFile(file);
+    setFoodImagePreview(URL.createObjectURL(file));
+
+    setVerificationState({
+      status: "verifying",
+      verdict: "",
+      confidence: null,
+      detectedFood: "",
+      reason: "",
+      fssaiDisclaimer: "",
+      imageOriginality: null,
+      originalityReasons: [],
+    });
+
+    try {
+      const verifyFormData = new FormData();
+      verifyFormData.append("file", file);
+      verifyFormData.append("foodName", formData.foodName.trim());
+      verifyFormData.append("category", formData.category);
+      if (captureToken) {
+        verifyFormData.append("captureToken", captureToken);
+      }
+      verifyFormData.append("captureMethod", captureMethod);
+      if (meta?.captureLat != null) {
+        verifyFormData.append("captureLat", meta.captureLat);
+      }
+      if (meta?.captureLng != null) {
+        verifyFormData.append("captureLng", meta.captureLng);
+      }
+
+      const response = await API.post("/donations/verify-image", verifyFormData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      const res = response.data;
+      setVerificationState({
+        status: (res.verdict || "Unverified").toLowerCase(),
+        verdict: res.verdict,
+        confidence: res.confidence,
+        detectedFood: res.detectedFood,
+        reason: res.rejectionReason,
+        fssaiDisclaimer:
+          res.screeningDisclaimer ||
+          "AI-assisted visual screening aligned with FSSAI guidance. Visual screening only; not a laboratory or medical certification.",
+        imageOriginality: res.imageOriginality || "Likely Original",
+        originalityReasons: res.originalityReasons || [],
+      });
+    } catch (err) {
+      console.error("Food image pre-verification failed:", err);
+      const detail =
+        err.response?.data?.detail ||
+        "Food image verification failed. Please upload a clear photo of edible food.";
+      setVerificationState({
+        status: "rejected",
+        verdict: "Rejected",
+        confidence: 0,
+        detectedFood: "",
+        reason: detail,
+        fssaiDisclaimer: "Visual screening failed to verify food authenticity.",
+        imageOriginality: "Suspicious",
+        originalityReasons: [detail],
+      });
+    }
+  };
+
+  const handleCameraCaptured = (blob, metadata) => {
+    const file = new File([blob], `live_food_capture_${Date.now()}.jpg`, {
+      type: "image/jpeg",
+    });
+    setCaptureCoords({
+      lat: metadata?.captureLat || null,
+      lng: metadata?.captureLng || null,
+    });
+    verifyAndSetFoodImage(file, "live_camera", metadata);
+  };
 
   const handleFoodImageChange = (event) => {
     const file = event.target.files[0];
-
     if (!file) {
       setFoodImageFile(null);
       setFoodImagePreview("");
+      setVerificationState({
+        status: "idle",
+        verdict: "",
+        confidence: null,
+        detectedFood: "",
+        reason: "",
+        fssaiDisclaimer: "",
+        imageOriginality: null,
+        originalityReasons: [],
+      });
       return;
     }
 
-    setFoodImageFile(file);
-    setFoodImagePreview(URL.createObjectURL(file));
+    verifyAndSetFoodImage(file, "gallery_upload");
+  };
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    setIsDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setPickupCoords({ lat: latitude, lng: longitude });
+
+        // Reverse geocode via OSM Nominatim
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            {
+              headers: { "User-Agent": "FoodBridgeAI/1.0" },
+            }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.display_name) {
+              setFormData((prev) => ({
+                ...prev,
+                location: data.display_name,
+              }));
+              setIsDetectingLocation(false);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn("[Reverse Geocode] error:", e);
+        }
+
+        setFormData((prev) => ({
+          ...prev,
+          location: `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`,
+        }));
+        setIsDetectingLocation(false);
+      },
+      (err) => {
+        console.error("GPS detection failed:", err);
+        alert("Could not access GPS location. Please check your browser permissions.");
+        setIsDetectingLocation(false);
+      },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
   };
 
   const handlePackagingImageChange = (event) => {
@@ -176,6 +343,25 @@ function DonorDashboard() {
       return;
     }
 
+    if (!foodImageFile) {
+      setMessage("Please upload a food image for AI inspection screening.");
+      return;
+    }
+
+    if (verificationState.status === "verifying") {
+      setMessage("Please wait for AI food quality screening to complete.");
+      return;
+    }
+
+    if (verificationState.verdict !== "Accepted") {
+      setMessage(
+        verificationState.reason
+          ? `Food image rejected: ${verificationState.reason}. Please upload a clear photo of edible food.`
+          : "Please upload a valid food photo that passes AI visual quality screening."
+      );
+      return;
+    }
+
     try {
       setLoading(true);
       setMessage("Uploading images and posting donation...");
@@ -196,11 +382,17 @@ function DonorDashboard() {
         packagingCondition: formData.packagingCondition.trim(),
         foodImage: foodImageUrl,
         packagingImage: packagingImageUrl,
+        captureToken: captureToken || undefined,
+        captureMethod: captureToken ? "live_camera" : "gallery_upload",
+        captureLat: captureCoords.lat,
+        captureLng: captureCoords.lng,
+        pickupLat: pickupCoords.lat,
+        pickupLng: pickupCoords.lng,
       };
 
       await API.post("/donations", donationPayload);
 
-      setMessage("Donation posted successfully with images.");
+      setMessage("Donation posted successfully with live food authenticity screening.");
 
       setFormData({
         foodName: "",
@@ -212,10 +404,22 @@ function DonorDashboard() {
         packagingCondition: "",
       });
 
+      setCaptureToken("");
+      setCaptureCoords({ lat: null, lng: null });
+      setPickupCoords({ lat: null, lng: null });
+
       setFoodImageFile(null);
       setPackagingImageFile(null);
       setFoodImagePreview("");
       setPackagingImagePreview("");
+      setVerificationState({
+        status: "idle",
+        verdict: "",
+        confidence: null,
+        detectedFood: "",
+        reason: "",
+        fssaiDisclaimer: "",
+      });
 
       const foodInput = document.getElementById("foodImage");
       const packagingInput = document.getElementById("packagingImage");
@@ -315,10 +519,9 @@ function DonorDashboard() {
         </section>
 
         <div className="demo-information">
-          <strong>Secure donor workflow connected:</strong> Your donations are
-          saved in MongoDB using your authenticated donor account. New listings
-          include AI priority prediction, confidence information and uploaded
-          food images.
+          <strong>Food redistribution platform:</strong> Surplus meals are screened
+          for safety aligned with FSSAI guidance, matched with verified local
+          receiver organizations, and scheduled for timely pickup.
         </div>
 
         {savedUser?.trustScore < 70 && (
@@ -475,14 +678,37 @@ function DonorDashboard() {
 
               <label>
                 Pickup Location
-                <input
-                  type="text"
-                  name="location"
-                  value={formData.location}
-                  onChange={handleInputChange}
-                  placeholder="Example: Solapur, Maharashtra"
-                  required
-                />
+                <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    onChange={handleInputChange}
+                    placeholder="Example: Solapur, Maharashtra"
+                    required
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-detect-loc"
+                    onClick={handleDetectLocation}
+                    disabled={isDetectingLocation}
+                    title="Detect current GPS location"
+                    style={{
+                      background: "#f1f5f9",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      padding: "0 12px",
+                      cursor: "pointer",
+                      fontSize: "0.85rem",
+                      fontWeight: 600,
+                      color: "#334155",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isDetectingLocation ? "Detecting..." : "📍 GPS"}
+                  </button>
+                </div>
               </label>
 
               <label>
@@ -498,14 +724,39 @@ function DonorDashboard() {
 
               <div className="donation-form-row">
                 <label>
-                  Food Image
-                  <input
-                    id="foodImage"
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleFoodImageChange}
-                  />
+                  Food Image <span style={{ color: "#ef4444" }}>*</span>
+                  <div style={{ display: "flex", gap: "10px", marginTop: "6px", marginBottom: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn-camera-trigger"
+                      onClick={handleOpenCameraModal}
+                      style={{
+                        background: "#10b981",
+                        color: "#fff",
+                        border: "none",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        boxShadow: "0 2px 6px rgba(16, 185, 129, 0.3)",
+                      }}
+                    >
+                      📷 Capture Live Photo
+                    </button>
+                    {import.meta.env.VITE_ALLOW_GALLERY_UPLOAD === "true" && (
+                      <input
+                        id="foodImage"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleFoodImageChange}
+                        style={{ maxWidth: "200px" }}
+                      />
+                    )}
+                  </div>
 
                   {foodImagePreview && (
                     <img
@@ -514,10 +765,67 @@ function DonorDashboard() {
                       alt="Food preview"
                     />
                   )}
+
+                  {verificationState.status === "verifying" && (
+                    <div className="verification-badge verifying">
+                      ⏳ Screening image authenticity & quality with Google Gemini AI...
+                    </div>
+                  )}
+
+                  {verificationState.status === "accepted" && (
+                    <div className="verification-badge accepted">
+                      <div className="badge-title">✅ Food Quality Verified</div>
+                      <div className="badge-detail">
+                        Detected: <strong>{verificationState.detectedFood || "Food"}</strong>
+                      </div>
+                      {verificationState.imageOriginality && (
+                        <div style={{ marginTop: "6px", fontSize: "0.85rem", fontWeight: 600 }}>
+                          🛡️ Authenticity:{" "}
+                          <span
+                            style={{
+                              color:
+                                verificationState.imageOriginality === "Likely Original"
+                                  ? "#059669"
+                                  : "#d97706",
+                            }}
+                          >
+                            {verificationState.imageOriginality}
+                          </span>
+                        </div>
+                      )}
+                      <div className="badge-disclaimer">
+                        ℹ️ {verificationState.fssaiDisclaimer}
+                      </div>
+                    </div>
+                  )}
+
+                  {verificationState.status === "rejected" && (
+                    <div className="verification-badge rejected">
+                      <div className="badge-title">❌ Image Verification Failed</div>
+                      <div className="badge-detail">
+                        {verificationState.reason || "Uploaded image does not appear to be edible food or is an unverified web/duplicate image."}
+                      </div>
+                      {verificationState.originalityReasons?.length > 0 && (
+                        <div style={{ fontSize: "0.8rem", marginTop: "4px", color: "#991b1b" }}>
+                          {verificationState.originalityReasons.join(" • ")}
+                        </div>
+                      )}
+                      <div className="badge-tip">
+                        Please take a live, original photograph of the prepared meal. Internet images, photos of screens, and non-food photos are strictly rejected.
+                      </div>
+                    </div>
+                  )}
+
+                  {verificationState.status === "unverified" && (
+                    <div className="verification-badge unverified">
+                      <div className="badge-title">⚠️ Image Unverified</div>
+                      <div className="badge-detail">{verificationState.reason || "Unable to confirm food quality visually."}</div>
+                    </div>
+                  )}
                 </label>
 
                 <label>
-                  Packaging Image
+                  Packaging Image (Optional)
                   <input
                     id="packagingImage"
                     type="file"
@@ -539,9 +847,20 @@ function DonorDashboard() {
               <button
                 className="post-donation-button"
                 type="submit"
-                disabled={loading}
+                disabled={loading || !foodImageFile || verificationState.status !== "accepted"}
+                title={
+                  !foodImageFile
+                    ? "Please upload a food image first"
+                    : verificationState.status !== "accepted"
+                    ? "Wait for food quality screening to pass"
+                    : "Post this donation"
+                }
               >
-                {loading ? "Posting Donation..." : "Post Donation"}
+                {loading
+                  ? "Posting Donation..."
+                  : verificationState.status === "verifying"
+                  ? "Screening Image..."
+                  : "Post Donation"}
               </button>
             </form>
           </div>
@@ -570,83 +889,120 @@ function DonorDashboard() {
               </div>
             ) : (
               <div className="donation-list">
-                {donations.map((donation) => (
-                  <div className="donation-record" key={donation.id}>
-                    <div className="record-top">
-                      <div>
-                        <h3>{donation.foodName}</h3>
-                        <p>{donation.category}</p>
-                      </div>
+                {donations.map((donation) => {
+                  const remaining = donation.remainingServings ?? donation.servings;
+                  const statusClass =
+                    donation.status === "Collected"
+                      ? "collected-status"
+                      : donation.status === "Partially Accepted"
+                      ? "partially-accepted-status"
+                      : donation.status === "Accepted"
+                      ? "accepted-status"
+                      : "active-status";
 
-                      <span
-                        className={`priority-pill ${donation.priority?.toLowerCase()}`}
-                      >
-                        AI Priority: {donation.priority}
-                      </span>
-                    </div>
+                  return (
+                    <div
+                      className="donation-record"
+                      key={donation.id}
+                      id={`donation-${donation.id}`}
+                    >
+                      <div className="record-top">
+                        <div>
+                          <h3>{donation.foodName}</h3>
+                          <p>{donation.category}</p>
+                        </div>
 
-                    {(donation.foodImage || donation.packagingImage) && (
-                      <div className="donation-images">
-                        {donation.foodImage && (
-                          <div>
-                            <p className="image-label">Food Image</p>
-                            <img
-                              className="donation-image"
-                              src={getImageUrl(donation.foodImage)}
-                              alt={donation.foodName}
-                            />
-                          </div>
-                        )}
-
-                        {donation.packagingImage && (
-                          <div>
-                            <p className="image-label">Packaging Image</p>
-                            <img
-                              className="donation-image"
-                              src={getImageUrl(donation.packagingImage)}
-                              alt="Packaging"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="record-information">
-                      <div>
-                        <span>Servings</span>
-                        <strong>{donation.servings}</strong>
-                      </div>
-
-                      <div>
-                        <span>Status</span>
-                        <strong
-                          className={
-                            donation.status === "Collected"
-                              ? "collected-status"
-                              : "active-status"
-                          }
+                        <span
+                          className={`priority-pill ${donation.priority?.toLowerCase()}`}
                         >
-                          {donation.status}
-                        </strong>
+                          Priority: {donation.priority}
+                        </span>
                       </div>
 
-                      <div>
-                        <span>AI Confidence</span>
-                        <strong>
-                          {donation.aiConfidence !== null &&
-                          donation.aiConfidence !== undefined
-                            ? `${donation.aiConfidence}%`
-                            : "Not available"}
-                        </strong>
+                      {(donation.foodImage || donation.packagingImage) && (
+                        <div className="donation-images">
+                          {donation.foodImage && (
+                            <div>
+                              <p className="image-label">Food Image</p>
+                              <img
+                                className="donation-image"
+                                src={getImageUrl(donation.foodImage)}
+                                alt={donation.foodName}
+                              />
+                            </div>
+                          )}
+
+                          {donation.packagingImage && (
+                            <div>
+                              <p className="image-label">Packaging Image</p>
+                              <img
+                                className="donation-image"
+                                src={getImageUrl(donation.packagingImage)}
+                                alt="Packaging"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="record-information">
+                        <div>
+                          <span>Servings</span>
+                          <strong>
+                            {remaining} / {donation.servings} remaining
+                          </strong>
+                        </div>
+
+                        <div>
+                          <span>Status</span>
+                          <strong className={statusClass}>
+                            {donation.status}
+                          </strong>
+                        </div>
+
+                        {donation.imageOriginality && (
+                          <div>
+                            <span>Originality</span>
+                            <strong
+                              style={{
+                                color:
+                                  donation.imageOriginality === "Likely Original"
+                                    ? "#059669"
+                                    : "#d97706",
+                              }}
+                            >
+                              {donation.imageOriginality}
+                            </strong>
+                          </div>
+                        )}
                       </div>
 
-                      <div>
-                        <span>Prediction</span>
-                        <strong>
-                          {donation.predictionMethod || "rule_fallback"}
-                        </strong>
-                      </div>
-                    </div>
+                      {donation.claims && donation.claims.length > 0 && (
+                        <div className="donation-claims-box">
+                          <h4 className="claims-title">Receiver Claims</h4>
+                          <div className="claims-grid">
+                            {donation.claims.map((claim) => (
+                              <div key={claim.id} className="claim-card-mini">
+                                <div className="claim-org-name">
+                                  🏢 {claim.receiverOrgName || "Receiver Org"}
+                                </div>
+                                <div className="claim-details">
+                                  <span>
+                                    <strong>{claim.quantity}</strong> servings
+                                  </span>
+                                  <span
+                                    className={`claim-status-badge ${claim.status
+                                      .toLowerCase()
+                                      .replace(/\s+/g, "-")}`}
+                                  >
+                                    {claim.status}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                     <p className="record-location">
                       📍 <strong>Location:</strong> {donation.location}
@@ -669,12 +1025,20 @@ function DonorDashboard() {
                       </p>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
+          )}
           </div>
         </section>
       </main>
+
+      {/* Live Camera Capture Modal */}
+      <CameraCaptureModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onCapture={handleCameraCaptured}
+      />
     </div>
   );
 }

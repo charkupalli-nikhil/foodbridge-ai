@@ -726,3 +726,125 @@ body {
     padding: 18px;
   }
 }
+
+/* Verification Badge */
+.verification-badge {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.verification-badge.verifying {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.verification-badge.accepted {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.verification-badge.rejected {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.verification-badge.unverified {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.badge-title {
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.badge-detail {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.badge-disclaimer,
+.badge-tip {
+  font-size: 11px;
+  opacity: 0.9;
+  font-style: italic;
+}
+
+/* Statuses */
+.partially-accepted-status {
+  color: #d97706;
+}
+
+.accepted-status {
+  color: #2563eb;
+}
+
+/* Claims Breakdown in Donor History */
+.donation-claims-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.claims-title {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.claims-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.claim-card-mini {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+}
+
+.claim-org-name {
+  font-weight: 600;
+  color: #334155;
+}
+
+.claim-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.claim-status-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.claim-status-badge.accepted {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.claim-status-badge.collected {
+  background: #dcfce7;
+  color: #15803d;
+}

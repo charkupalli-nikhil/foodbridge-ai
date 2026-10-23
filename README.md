@@ -69,22 +69,28 @@ Administrators can:
 * View total meals recovered.
 * View all platform users and donation activity.
 
-### AI Food Quality & Priority Assessment (Google Gemini)
+### AI-Assisted Food Safety Screening & Layered Originality Check
 
-FoodBridge AI integrates **Google Gemini 1.5 Pro** to automatically verify food images.
-* **Anti-Fake System:** Detects if an uploaded image is a real photo of food, rejecting random pictures.
-* **Smart Priority:** Evaluates freshness and assigns priority (High, Medium, Low) based on visual packaging and category.
+FoodBridge AI integrates **Google Gemini** multimodal vision aligned with FSSAI guidance alongside a multi-layered authenticity engine to verify food safety and originality:
+* **Live Camera Capture Flow:** Guided camera viewfinder captures fresh photos directly from the donor's device with server-signed 10-minute capture session tokens.
+* **EXIF Recency Verification:** Extracts camera metadata and validates that photos were captured recently (<= 30 minutes).
+* **Perceptual Hashing & Duplicate Detection:** Computes SHA-256, pHash, and dHash fingerprints against past database records with Hamming distance thresholding (<= 6) to detect reused photos or downloaded stock images.
+* **Geospatial Capture Verification:** Compares device capture GPS coordinates against the declared pickup location via Haversine calculation, flagging discrepancies > 1.0 km.
+* **Visual Authenticity Cues:** Gemini vision inspects for stock photo watermarks, digital screen moiré patterns, and artificial studio staging.
+* **Fail-Closed Authenticity Enforcement:** Submissions scored as "Likely Internet Image" are blocked with HTTP 422 and deduct donor trust score points.
 
-### Geospatial Smart Matching
+### Geospatial Smart Matching & Logistics Feasibility
 
-Instead of generic keyword matching, the system calculates the real Haversine Distance in Kilometres between the Donor and NGO using **OpenStreetMap Nominatim API**, sorting available donations by nearest physical proximity.
+* **OpenStreetMap Nominatim Geocoding:** Auto-populates GeoJSON `Point` coordinates for donor pickup locations and receiver organization facilities, backed by an in-memory 1 req/sec throttle and a 90-day MongoDB cache.
+* **Real Road Distance & Travel ETA:** Combines great-circle Haversine distance with an urban circuity multiplier (1.3x) and a 25 km/h urban velocity model to compute accurate road travel times.
+* **Time Feasibility Engine:** Evaluates whether a receiver can travel to the donor before the `pickupDeadline`. If the ETA exceeds the time remaining, an urgency alert is triggered.
+* **Deterministic Proximity Match:** Generates a 0–100% proximity score ($100 \times \max(0, 1 - \text{roadDist}/25)$) and allows sorting by Best Match, Distance, Urgency, or Newest.
+* **Targeted Proximity Notifications:** Dispatches distance-aware alerts (e.g. `(4.2 km away)`) to verified receivers within the configured notification radius.
 
-### Real-Time Impact Analytics
+### Privacy-Preserving Donation Cards
 
-Using robust MongoDB Aggregation Pipelines and **Recharts**, the platform offers dynamic dashboard charts tracking:
-* Donations over time (Line Charts)
-* Food category distributions (Pie Charts)
-* Complete tracking of total meals redistributed.
+* **Clean Priority Presentation:** Donation cards display neutral priority indicators (`Priority: High / Medium / Low`) without exposing internal algorithmic parameters or raw confidence percentages to public users.
+* **Role-Based Inspection:** Administrators retain full visibility of model features, confidence scores, and perceptual hash metadata for safety compliance and audits.
 
 ---
 
@@ -246,6 +252,31 @@ FoodBridge AI uses role-based authentication and authorization.
 
 ---
 
+### AI Food Inspection & Quality Assessment (Google GenAI SDK)
+
+FoodBridge AI integrates **Google Gemini 2.5 Flash** via the official `google-genai` SDK for automated visual food screening strictly aligned with **FSSAI** guidance:
+* **Anti-Fake Screening:** Rejects non-food items (laptops, walls, electronic devices, memes, screenshots, empty plates).
+* **Description Match Verification:** Confirms that the uploaded food photo visually matches the donor's declared title and category.
+* **Fail-Closed Architecture:** If confidence is below 0.60 or verification cannot be performed, the system marks the inspection as `Unverified` and prevents unverified donation creation.
+* **FSSAI Disclaimer:** Clearly identifies screening as an AI-assisted visual check, not a laboratory certification.
+
+### In-App Notification System
+
+A persistent MongoDB `notifications` collection with compound and 30-day TTL indexes:
+* Automated alerts dispatched on new donation listings, partial pickups, complete acceptance, and collection completion.
+* Unread badge counter with automatic background polling every 20 seconds.
+* Direct deep-linking with card focus and pulse highlighting.
+
+### Partial Acceptance & Claims Architecture
+
+Supports multi-organization food recovery for large donations:
+* A dedicated `claims` collection tracks which organization accepted what quantity.
+* Atomic `$inc` and `$gte` MongoDB operations prevent race conditions and over-allocation.
+* Life cycle: `Active` ➔ `Partially Accepted` ➔ `Accepted` ➔ `Collected`.
+* Receiver capacity limits prevent over-claiming beyond handling capabilities.
+
+---
+
 ## REST API Endpoints
 
 ### Authentication APIs
@@ -256,78 +287,94 @@ FoodBridge AI uses role-based authentication and authorization.
 | `POST` | `/api/auth/login`    | Login user and receive JWT token |
 | `GET`  | `/api/auth/me`       | Get currently authenticated user |
 
-### Donation APIs
+### Donation & Verification APIs
 
-| Method  | Endpoint                               | Purpose                          | Access |
-| ------- | -------------------------------------- | -------------------------------- | ------ |
-| `GET`   | `/api/donations/my`                    | View donor's submitted donations | Donor  |
-| `POST`  | `/api/donations`                       | Create a new donation            | Donor  |
-| `GET`   | `/api/donations/available`             | View available active donations  | NGO    |
-| `GET`   | `/api/donations/my-pickups`            | View assigned NGO pickups        | NGO    |
-| `PATCH` | `/api/donations/{donation_id}/accept`  | Accept an active donation        | NGO    |
-| `PATCH` | `/api/donations/{donation_id}/collect` | Mark accepted food as collected  | NGO    |
+| Method  | Endpoint                               | Purpose                                          | Access |
+| ------- | -------------------------------------- | ------------------------------------------------ | ------ |
+| `POST`  | `/api/donations/verify-image`          | Pre-submission AI food inspection screening      | Donor  |
+| `GET`   | `/api/donations/my`                    | View donor's submitted donations and claims      | Donor  |
+| `POST`  | `/api/donations`                       | Create a new donation with verified food image   | Donor  |
+| `GET`   | `/api/donations/available`             | View active & partially accepted donations       | NGO    |
+| `GET`   | `/api/donations/recommended`           | View AI-prioritised and geo-matched donations    | NGO    |
+| `GET`   | `/api/donations/my-pickups`            | View assigned NGO pickup claims                  | NGO    |
+| `PATCH` | `/api/donations/{donation_id}/accept`  | Accept/claim servings from an available donation | NGO    |
+| `PATCH` | `/api/claims/{claim_id}/collect`       | Mark specific claim quantity as collected        | NGO    |
+| `PATCH` | `/api/donations/{donation_id}/collect` | Backward-compatible collection completion        | NGO    |
+
+### Notification APIs
+
+| Method  | Endpoint                               | Purpose                                      | Access        |
+| ------- | -------------------------------------- | -------------------------------------------- | ------------- |
+| `GET`   | `/api/notifications`                   | Fetch user notifications (supports limit)    | Authenticated |
+| `GET`   | `/api/notifications/unread-count`      | Get unread notification badge count          | Authenticated |
+| `PATCH` | `/api/notifications/{id}/read`         | Mark a single notification as read           | Authenticated |
+| `PATCH` | `/api/notifications/read-all`          | Mark all user notifications as read          | Authenticated |
 
 ### Statistics APIs
 
-| Method | Endpoint                | Purpose                           | Access |
-| ------ | ----------------------- | --------------------------------- | ------ |
-| `GET`  | `/api/statistics/donor` | View donor recovery statistics    | Donor  |
-| `GET`  | `/api/statistics/ngo`   | View NGO collection statistics    | NGO    |
-| `GET`  | `/api/admin/statistics` | View complete platform statistics | Admin  |
+| Method | Endpoint                | Purpose                            | Access |
+| ------ | ----------------------- | ---------------------------------- | ------ |
+| `GET`  | `/api/statistics/donor` | View donor recovery & claim stats  | Donor  |
+| `GET`  | `/api/statistics/ngo`   | View NGO collection & claim stats  | NGO    |
+| `GET`  | `/api/admin/statistics` | View complete platform statistics  | Admin  |
+| `GET`  | `/api/public/stats`     | Public aggregate recovery counters | Public |
 
 ### Admin APIs
 
-| Method | Endpoint                | Purpose                   |
-| ------ | ----------------------- | ------------------------- |
-| `GET`  | `/api/admin/statistics` | Platform-level metrics    |
-| `GET`  | `/api/admin/users`      | View registered accounts  |
-| `GET`  | `/api/admin/donations`  | View all donation records |
+| Method | Endpoint                            | Purpose                            |
+| ------ | ----------------------------------- | ---------------------------------- |
+| `GET`  | `/api/admin/statistics`             | Platform-level metrics             |
+| `GET`  | `/api/admin/users`                  | View registered platform accounts  |
+| `GET`  | `/api/admin/donations`              | View all donations and claims      |
+| `GET`  | `/api/admin/verification/pending`   | Review pending NGO applications    |
+| `PUT`  | `/api/admin/verification/{id}/approve` | Approve NGO account             |
+| `PUT`  | `/api/admin/verification/{id}/reject`  | Reject NGO application          |
 
 ---
 
-## Database Design
+## Database Architecture
 
-The application stores information in MongoDB Atlas using two primary collections.
+Data is stored in MongoDB Atlas across four indexed collections:
 
-### Users Collection
+### 1. `users` Collection
+Stores user profiles, credentials, verification documents, and trust ratings.
 
+### 2. `donations` Collection
+Tracks food listings, remaining servings, AI inspection verdicts, and pickup deadlines.
+* Compound index: `status`, `remainingServings`, `createdAt`.
+* TTL index: `pickupDeadline` (expires unaccepted Active listings after deadline).
+
+### 3. `claims` Collection
+Tracks partial acceptance and multi-organization claims:
 ```json
 {
-  "fullName": "User Name",
-  "email": "user@example.com",
-  "organisation": "Organisation Name",
-  "role": "donor | ngo | admin",
-  "location": "Operating Location",
-  "contactNumber": "Mobile Number",
-  "passwordHash": "Secure Hashed Password",
-  "createdAt": "Date and Time"
+  "_id": "ObjectId",
+  "donationId": "Donation ID string",
+  "receiverUserId": "NGO User ID string",
+  "receiverOrgName": "Hope Foundation",
+  "quantity": 30,
+  "status": "Accepted | Collected",
+  "createdAt": "Timestamp",
+  "collectedAt": "Timestamp (optional)"
 }
 ```
 
-### Donations Collection
-
+### 4. `notifications` Collection
+Stores asynchronous in-app notifications:
 ```json
 {
-  "foodName": "Vegetable Rice Meal",
-  "category": "Cooked Meal",
-  "servings": 60,
-  "preparationTime": "Prepared 20 minutes ago",
-  "pickupDeadline": "Date and Time",
-  "location": "Pickup Location",
-  "packagingCondition": "Packed in clean covered containers",
-  "donorUserId": "Donor Account ID",
-  "donorName": "Donor Name",
-  "donorOrganisation": "Donor Organisation",
-  "priority": "High | Medium | Low",
-  "status": "Active | Accepted | Collected",
-  "acceptedByUserId": "NGO Account ID",
-  "acceptedByName": "NGO Contact Name",
-  "acceptedByOrganisation": "NGO Organisation",
-  "acceptedAt": "Date and Time",
-  "collectedAt": "Date and Time",
-  "createdAt": "Date and Time"
+  "_id": "ObjectId",
+  "recipientUserId": "User ID string",
+  "type": "new_donation | donation_accepted | partial_remaining | pickup_collected",
+  "title": "Title string",
+  "message": "Notification message string",
+  "donationId": "Donation ID string (optional)",
+  "read": false,
+  "createdAt": "Timestamp"
 }
 ```
+* Compound Index: `recipientUserId` (1), `read` (1), `createdAt` (-1).
+* TTL Index: `createdAt` with `expireAfterSeconds: 2592000` (auto-purges after 30 days).
 
 ---
 

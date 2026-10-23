@@ -391,8 +391,8 @@ function AdminDashboard() {
         <div className="safety-note">
           <h3>Platform Monitoring</h3>
           <p>
-            Monitor registered organisations, donation workflows, AI priority
-            predictions, uploaded food images and recovered meal impact across
+            Monitor registered organisations, donation workflows, automated
+            screening, uploaded food images and recovered meal impact across
             the FoodBridge platform.
           </p>
         </div>
@@ -773,8 +773,49 @@ function AdminDashboard() {
                             donation.priority
                           )}`}
                         >
-                          AI Priority: {donation.priority || "Medium"}
+                          Priority: {donation.priority || "Medium"}
                         </span>
+
+                        {donation.imageOriginality && (
+                          <span
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: "9999px",
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                              background:
+                                donation.imageOriginality === "Likely Original"
+                                  ? "#ecfdf5"
+                                  : donation.imageOriginality === "Suspicious"
+                                  ? "#fffbeb"
+                                  : donation.imageOriginality === "Likely Internet Image"
+                                  ? "#fef2f2"
+                                  : "#f1f5f9",
+                              color:
+                                donation.imageOriginality === "Likely Original"
+                                  ? "#059669"
+                                  : donation.imageOriginality === "Suspicious"
+                                  ? "#b45309"
+                                  : donation.imageOriginality === "Likely Internet Image"
+                                  ? "#b91c1c"
+                                  : "#475569",
+                              border: `1px solid ${
+                                donation.imageOriginality === "Likely Original"
+                                  ? "#a7f3d0"
+                                  : donation.imageOriginality === "Suspicious"
+                                  ? "#fde68a"
+                                  : donation.imageOriginality === "Likely Internet Image"
+                                  ? "#fecaca"
+                                  : "#cbd5e1"
+                              }`,
+                            }}
+                          >
+                            📷 {donation.imageOriginality}
+                            {donation.originalityScore !== undefined &&
+                              donation.originalityScore !== null &&
+                              ` (${donation.originalityScore}/100)`}
+                          </span>
+                        )}
 
                         <span
                           className={`admin-status-pill ${donation.status.toLowerCase()}`}
@@ -789,7 +830,9 @@ function AdminDashboard() {
                     <div className="admin-donation-details">
                       <div>
                         <span>Servings</span>
-                        <strong>{donation.servings}</strong>
+                        <strong>
+                          {(donation.remainingServings ?? donation.servings)} / {donation.servings} left
+                        </strong>
                       </div>
 
                       <div>
@@ -819,27 +862,63 @@ function AdminDashboard() {
                         <strong>{donation.packagingCondition}</strong>
                       </div>
 
-                      <div>
-                        <span>AI Confidence</span>
-                        <strong>
-                          {formatAiConfidence(donation.aiConfidence)}
-                        </strong>
-                      </div>
+                      {donation.imageOriginality ? (
+                        <div>
+                          <span>Originality</span>
+                          <strong>
+                            {donation.imageOriginality} ({donation.originalityScore ?? "--"}/100)
+                          </strong>
+                        </div>
+                      ) : (
+                        <div>
+                          <span>Originality</span>
+                          <strong>Verified</strong>
+                        </div>
+                      )}
                     </div>
 
-                    {donation.predictionFeatures && (
-                      <p className="admin-assignment-text">
-                        ML Features:{" "}
-                        <strong>
-                          {donation.predictionFeatures
-                            .preparation_age_minutes ?? "N/A"}{" "}
-                          min prepared age •{" "}
-                          {donation.predictionFeatures
-                            .pickup_window_minutes ?? "N/A"}{" "}
-                          min pickup window • Packaging score{" "}
-                          {donation.predictionFeatures.packaging_score ?? "N/A"}
+                    {donation.claims && donation.claims.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: "10px",
+                          padding: "10px 14px",
+                          background: "#f8fafc",
+                          borderRadius: "8px",
+                          border: "1px solid #e2e8f0",
+                        }}
+                      >
+                        <strong
+                          style={{ fontSize: "0.85rem", color: "#1e293b" }}
+                        >
+                          Claims Breakdown:
                         </strong>
-                      </p>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "4px",
+                            marginTop: "6px",
+                          }}
+                        >
+                          {donation.claims.map((c) => (
+                            <div
+                              key={c.id}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                fontSize: "0.8rem",
+                                color: "#475569",
+                              }}
+                            >
+                              <span>🏢 {c.receiverOrgName || "Receiver"}</span>
+                              <span>
+                                <strong>{c.quantity}</strong> servings (
+                                {c.status})
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     {donation.acceptedByOrganisation && (

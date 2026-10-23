@@ -187,7 +187,7 @@ async function readErrorMessage(response) {
 function NgoDashboard() {
   const navigate = useNavigate();
 
-  const [ngo] = useState(getStoredUser);
+  const [ngo, setNgo] = useState(getStoredUser);
   const [availableDonations, setAvailableDonations] = useState([]);
   const [recommendedDonations, setRecommendedDonations] = useState([]);
   const [myPickups, setMyPickups] = useState([]);
@@ -196,6 +196,12 @@ function NgoDashboard() {
   const [processingId, setProcessingId] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Sort and location matching states
+  const [sortOrder, setSortOrder] = useState("match");
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [newLocationAddress, setNewLocationAddress] = useState(ngo?.location || "");
+  const [isUpdatingLocation, setIsUpdatingLocation] = useState(false);
 
   const authenticatedRequest = useCallback(
     async (endpoint, options = {}) => {
@@ -230,7 +236,7 @@ function NgoDashboard() {
     [navigate]
   );
 
-  const loadDashboardData = useCallback(async () => {
+  const loadDashboardData = useCallback(async (currentSort = sortOrder) => {
     try {
       setIsLoading(true);
       setErrorMessage("");
@@ -242,7 +248,7 @@ function NgoDashboard() {
 
       const [availableResponse, recommendedResponse, pickupsResponse, statisticsResponse] =
         await Promise.all([
-          authenticatedRequest("/donations/available"),
+          authenticatedRequest(`/donations/available?sort=${currentSort}`),
           authenticatedRequest("/donations/recommended"),
           authenticatedRequest("/donations/my-pickups"),
           authenticatedRequest("/statistics/ngo"),
@@ -282,11 +288,71 @@ function NgoDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [authenticatedRequest]);
+  }, [authenticatedRequest, ngo?.verificationStatus, sortOrder]);
 
   useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
+    loadDashboardData(sortOrder);
+  }, [loadDashboardData, sortOrder]);
+
+  const handleUpdateLocation = async (e) => {
+    e.preventDefault();
+    if (!newLocationAddress.trim()) return;
+
+    try {
+      setIsUpdatingLocation(true);
+      const res = await authenticatedRequest("/users/me/location", {
+        method: "PATCH",
+        body: JSON.stringify({ location: newLocationAddress.trim() }),
+      });
+
+      if (!res.ok) {
+        const err = await readErrorMessage(res);
+        throw new Error(err);
+      }
+
+      const updatedUser = await res.json();
+      setNgo(updatedUser);
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      setIsLocationModalOpen(false);
+      showSuccessMessage("Location updated successfully! Matching distance recalculated.");
+      await loadDashboardData(sortOrder);
+    } catch (err) {
+      alert("Failed to update location: " + err.message);
+    } finally {
+      setIsUpdatingLocation(false);
+    }
+  };
+
+  const handleGpsDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            { headers: { "User-Agent": "FoodBridgeAI/1.0" } }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.display_name) {
+              setNewLocationAddress(data.display_name);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn("[Reverse Geocode] error:", e);
+        }
+        setNewLocationAddress(`Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`);
+      },
+      (err) => alert("Could not access GPS: " + err.message),
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  };
 
   const showSuccessMessage = (message) => {
     setSuccessMessage(message);
@@ -296,7 +362,26 @@ function NgoDashboard() {
     }, 5000);
   };
 
-  const handleAcceptDonation = async (donationId) => {
+  const [acceptModal, setAcceptModal] = useState({
+    isOpen: false,
+    donation: null,
+    quantity: 1,
+    error: "",
+  });
+
+  const openAcceptModal = (donation) => {
+    const remaining = donation.remainingServings ?? donation.servings;
+    const capacity = ngo?.capacity ? Number(ngo.capacity) : 0;
+    const defaultQty = capacity > 0 ? Math.min(remaining, capacity) : remaining;
+    setAcceptModal({
+      isOpen: true,
+      donation,
+      quantity: Math.max(1, defaultQty),
+      error: "",
+    });
+  };
+
+  const handleAcceptDonation = async (donationId, quantity) => {
     try {
       setProcessingId(donationId);
       setErrorMessage("");
@@ -305,6 +390,7 @@ function NgoDashboard() {
         `/donations/${donationId}/accept`,
         {
           method: "PATCH",
+          body: JSON.stringify({ quantity: Number(quantity) }),
         }
       );
 
@@ -313,8 +399,9 @@ function NgoDashboard() {
         throw new Error(message);
       }
 
+      setAcceptModal({ isOpen: false, donation: null, quantity: 1, error: "" });
       showSuccessMessage(
-        "Pickup accepted successfully. It is now assigned to your receiver account."
+        `Successfully accepted ${quantity} servings. It is now assigned to your receiver account.`
       );
 
       await loadDashboardData();
@@ -325,17 +412,16 @@ function NgoDashboard() {
     }
   };
 
-  const handleMarkCollected = async (donationId) => {
+  const handleMarkCollected = async (claimId, donationId) => {
     try {
-      setProcessingId(donationId);
+      const targetId = claimId || donationId;
+      setProcessingId(targetId);
       setErrorMessage("");
 
-      const response = await authenticatedRequest(
-        `/donations/${donationId}/collect`,
-        {
-          method: "PATCH",
-        }
-      );
+      const url = claimId ? `/claims/${claimId}/collect` : `/donations/${donationId}/collect`;
+      const response = await authenticatedRequest(url, {
+        method: "PATCH",
+      });
 
       if (!response.ok) {
         const message = await readErrorMessage(response);
@@ -416,11 +502,10 @@ function NgoDashboard() {
         </nav>
 
         <div className="safety-note">
-          <h3>AI Priority Support</h3>
+          <h3>Food Safety Reminder</h3>
           <p>
-            FoodBridge AI predicts pickup priority using donation details. Your
-            receiver organisation must still verify food condition and safe handling
-            before distribution.
+            Surplus food listings undergo visual screening aligned with FSSAI guidelines.
+            Your organization should inspect food condition upon pickup.
           </p>
         </div>
 
@@ -440,13 +525,36 @@ function NgoDashboard() {
               <div
                 style={{
                   color: "#64748b",
-                  marginTop: "4px",
+                  marginTop: "6px",
                   fontSize: "14px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
                 }}
               >
-                {ngo.organizationType || "Receiver Organization"}
-
-                {ngo.location ? ` • ${ngo.location}` : ""}
+                <span>{ngo.organizationType || "Receiver Organization"}</span>
+                <span>•</span>
+                <span>📍 {ngo.location || "Location not set"}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewLocationAddress(ngo.location || "");
+                    setIsLocationModalOpen(true);
+                  }}
+                  style={{
+                    background: "#e0f2fe",
+                    border: "1px solid #bae6fd",
+                    borderRadius: "6px",
+                    color: "#0369a1",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    padding: "3px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Change Location
+                </button>
               </div>
             </div>
           </div>
@@ -456,7 +564,7 @@ function NgoDashboard() {
             <button
               className="refresh-donations-button"
               type="button"
-              onClick={loadDashboardData}
+              onClick={() => loadDashboardData(sortOrder)}
             >
               Refresh Donations
             </button>
@@ -468,10 +576,9 @@ function NgoDashboard() {
         </header>
 
         <section className="demo-information">
-          <strong>Secure receiver workflow connected:</strong> Available donations
-          and assigned pickups are read from MongoDB using your authenticated NGO
-          account. New listings include AI priority prediction, confidence
-          information, food images and packaging images.
+          <strong>Food redistribution platform:</strong> Available donations are
+          geographically matched to your organization based on proximity and handling capacity,
+          allowing efficient scheduling and pickup coordination.
         </section>
 
         {successMessage && (
@@ -568,88 +675,264 @@ function NgoDashboard() {
               </div>
 
               <div className="ngo-donation-list">
-                {recommendedDonations.map((donation) => (
-                  <article className="ngo-donation-card" key={`rec-${donation.id}`} style={{ border: '1px solid #c4b5fd' }}>
-                    <div className="ngo-card-top">
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <h3 style={{ margin: 0 }}>{donation.foodName}</h3>
-                          {donation.matchScore && (
-                            <span style={{ background: '#8b5cf6', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                              {donation.matchScore}% Match
+                {recommendedDonations.map((donation) => {
+                  const total = donation.servings;
+                  const remaining = donation.remainingServings ?? total;
+                  const claimed = total - remaining;
+                  const percentClaimed = Math.round((claimed / total) * 100);
+
+                  return (
+                    <article
+                      className="ngo-donation-card"
+                      key={`rec-${donation.id}`}
+                      id={`donation-${donation.id}`}
+                      style={{ border: "1px solid #c4b5fd" }}
+                    >
+                      <div className="ngo-card-top">
+                        <div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <h3 style={{ margin: 0 }}>{donation.foodName}</h3>
+                            {donation.matchScore && (
+                              <span
+                                style={{
+                                  background: "#8b5cf6",
+                                  color: "white",
+                                  padding: "2px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "0.75rem",
+                                  fontWeight: "bold",
+                                }}
+                              >
+                                {donation.matchScore}% Match
+                              </span>
+                            )}
+                          </div>
+                          <p>
+                            {donation.category} • {donation.donorOrganisation}
+                          </p>
+                        </div>
+
+                        <span
+                          className={`priority-pill ${getPriorityClass(
+                            donation.priority
+                          )}`}
+                        >
+                          Priority: {donation.priority || "Medium"}
+                        </span>
+                      </div>
+
+                      <DonationImages donation={donation} />
+
+                      {donation.match && (
+                        <div
+                          className="ngo-match-box"
+                          style={{
+                            margin: "10px 0",
+                            background: "#f8fafc",
+                            padding: "10px 12px",
+                            borderRadius: "10px",
+                            border: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              marginBottom: "6px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.85rem",
+                                fontWeight: 600,
+                                color: "#1e293b",
+                              }}
+                            >
+                              Match Score:{" "}
+                              <strong
+                                style={{
+                                  color:
+                                    donation.match.matchPercent >= 80
+                                      ? "#059669"
+                                      : donation.match.matchPercent >= 50
+                                      ? "#d97706"
+                                      : "#dc2626",
+                                }}
+                              >
+                                {donation.match.matchPercent}%
+                              </strong>
                             </span>
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "#64748b",
+                                fontWeight: 500,
+                              }}
+                            >
+                              🚗 {donation.match.distanceKm} km · ~
+                              {donation.match.estimatedTravelMinutes} min drive
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              height: "6px",
+                              width: "100%",
+                              background: "#e2e8f0",
+                              borderRadius: "3px",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: "100%",
+                                width: `${donation.match.matchPercent}%`,
+                                background: donation.match.feasible
+                                  ? donation.match.matchPercent >= 80
+                                    ? "linear-gradient(90deg, #10b981, #059669)"
+                                    : donation.match.matchPercent >= 50
+                                    ? "linear-gradient(90deg, #f59e0b, #d97706)"
+                                    : "#ef4444"
+                                  : "#94a3b8",
+                                borderRadius: "3px",
+                                transition: "width 0.3s ease",
+                              }}
+                            />
+                          </div>
+
+                          {donation.match.feasible === false && (
+                            <div
+                              style={{
+                                marginTop: "6px",
+                                fontSize: "0.78rem",
+                                color: "#b91c1c",
+                                fontWeight: 600,
+                              }}
+                            >
+                              ⚠️ {donation.match.feasibilityReason ||
+                                "Cannot reach before pickup deadline"}
+                            </div>
+                          )}
+
+                          {donation.match.directionsUrl && (
+                            <div style={{ marginTop: "6px", textAlign: "right" }}>
+                              <a
+                                href={donation.match.directionsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontSize: "0.8rem",
+                                  color: "#2563eb",
+                                  textDecoration: "none",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                🗺️ Directions in Google Maps ↗
+                              </a>
+                            </div>
                           )}
                         </div>
-                        <p>
-                          {donation.category} • {donation.donorOrganisation}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`priority-pill ${getPriorityClass(
-                          donation.priority
-                        )}`}
-                      >
-                        AI Priority: {donation.priority || "Medium"}
-                      </span>
-                    </div>
-
-                    <DonationImages donation={donation} />
-
-                    <div className="ngo-donation-details">
-                      <div>
-                        <span>Servings</span>
-                        <strong>{donation.servings}</strong>
-                      </div>
-
-                      <div>
-                        <span>Status</span>
-                        <strong className="active-status">
-                          {donation.status}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <p className="ngo-location">
-                      📍 {donation.location}
-                      {donation.distanceKm !== undefined && donation.distanceKm !== null && (
-                        <span style={{ color: '#059669', fontWeight: 'bold', marginLeft: '6px' }}>
-                          ({donation.distanceKm} km away)
-                        </span>
                       )}
-                    </p>
 
-                    <p className="ngo-deadline">
-                      Pickup before: {formatDateTime(donation.pickupDeadline)}
-                    </p>
-
-                    {donation.imageAnalysis && (
-                      <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
-                        <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
+                      <div className="servings-progress-wrapper">
+                        <div className="servings-progress-header">
                           <span>
-                            <strong>Quality Assessment:</strong> Freshness indicator: {donation.imageAnalysis.freshnessIndicator} | Visual condition: {donation.imageAnalysis.visualCondition}
+                            <strong>{remaining}</strong> / {total} servings
+                            available
                           </span>
-                        </p>
+                          <span>
+                            {claimed > 0
+                              ? `${claimed} claimed (${percentClaimed}%)`
+                              : "Full quantity"}
+                          </span>
+                        </div>
+                        <div className="servings-progress-track">
+                          <div
+                            className="servings-progress-fill"
+                            style={{ width: `${percentClaimed}%` }}
+                          />
+                        </div>
                       </div>
-                    )}
 
-                    <p className="ngo-packaging">
-                      <strong>Packaging:</strong> {donation.packagingCondition}
-                    </p>
+                      <div className="ngo-donation-details">
+                        <div>
+                          <span>Servings</span>
+                          <strong>
+                            {remaining} of {total} left
+                          </strong>
+                        </div>
 
-                    <button
-                      className="accept-donation-button"
-                      type="button"
-                      disabled={processingId === donation.id}
-                      onClick={() => handleAcceptDonation(donation.id)}
-                    >
-                      {processingId === donation.id
-                        ? "Accepting Pickup..."
-                        : "Accept Pickup Request"}
-                    </button>
-                  </article>
-                ))}
+                        <div>
+                          <span>Status</span>
+                          <strong
+                            className={
+                              donation.status === "Partially Accepted"
+                                ? "partially-accepted-status"
+                                : "active-status"
+                            }
+                          >
+                            {donation.status}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {donation.foodVerdict && (
+                        <div className="ngo-fssai-pill">
+                          <span>
+                            🛡️ Food Screening:{" "}
+                            <strong>{donation.foodVerdict}</strong> (
+                            {donation.detectedFood || "Food"})
+                          </span>
+                          <small>
+                            {donation.fssaiDisclaimer ||
+                              "Visual screening aligned with FSSAI guidance. Not a lab certification."}
+                          </small>
+                        </div>
+                      )}
+
+                      <p className="ngo-location">
+                        📍 {donation.location}
+                        {donation.distanceKm !== undefined &&
+                          donation.distanceKm !== null && (
+                            <span
+                              style={{
+                                color: "#059669",
+                                fontWeight: "bold",
+                                marginLeft: "6px",
+                              }}
+                            >
+                              ({donation.distanceKm} km away)
+                            </span>
+                          )}
+                      </p>
+
+                      <p className="ngo-deadline">
+                        Pickup before: {formatDateTime(donation.pickupDeadline)}
+                      </p>
+
+                      <p className="ngo-packaging">
+                        <strong>Packaging:</strong> {donation.packagingCondition}
+                      </p>
+
+                      <button
+                        className="accept-donation-button"
+                        type="button"
+                        disabled={processingId === donation.id}
+                        onClick={() => openAcceptModal(donation)}
+                      >
+                        {processingId === donation.id
+                          ? "Processing..."
+                          : "Accept Pickup Request"}
+                      </button>
+                    </article>
+                  );
+                })}
               </div>
             </article>
           )}
@@ -657,13 +940,36 @@ function NgoDashboard() {
           <article className="ngo-panel" id="available-donations">
             <div className="dashboard-section-title">
               <div>
-                <p>AI-PRIORITISED REQUESTS</p>
+                <p>DONATION LISTINGS</p>
                 <h2>Available Donations</h2>
               </div>
 
-              <span className="listing-count">
-                {availableDonations.length} Available
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <label style={{ fontSize: "0.85rem", color: "#475569", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}>
+                  Sort by:
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value)}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#fff",
+                      fontSize: "0.85rem",
+                      color: "#1e293b",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="match">Best Match (Recommended)</option>
+                    <option value="distance">Distance (Nearest First)</option>
+                    <option value="priority">Priority (High First)</option>
+                    <option value="newest">Newest First</option>
+                  </select>
+                </label>
+                <span className="listing-count">
+                  {availableDonations.length} Available
+                </span>
+              </div>
             </div>
 
             {isLoading ? (
@@ -679,81 +985,241 @@ function NgoDashboard() {
                   </div>
                 )}
 
-                {availableDonations.map((donation) => (
-                  <article className="ngo-donation-card" key={donation.id}>
-                    <div className="ngo-card-top">
-                      <div>
-                        <h3>{donation.foodName}</h3>
-                        <p>
-                          {donation.category} • {donation.donorOrganisation}
-                        </p>
-                      </div>
+                {availableDonations.map((donation) => {
+                  const total = donation.servings;
+                  const remaining = donation.remainingServings ?? total;
+                  const claimed = total - remaining;
+                  const percentClaimed = Math.round((claimed / total) * 100);
 
-                      <span
-                        className={`priority-pill ${getPriorityClass(
-                          donation.priority
-                        )}`}
-                      >
-                        AI Priority: {donation.priority || "Medium"}
-                      </span>
-                    </div>
-
-                    <DonationImages donation={donation} />
-
-                    <div className="ngo-donation-details">
-                      <div>
-                        <span>Servings</span>
-                        <strong>{donation.servings}</strong>
-                      </div>
-
-                      <div>
-                        <span>Status</span>
-                        <strong className="active-status">
-                          {donation.status}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <p className="ngo-location">
-                      📍 {donation.location}
-                      {donation.distanceKm !== undefined && donation.distanceKm !== null && (
-                        <span style={{ color: '#059669', fontWeight: 'bold', marginLeft: '6px' }}>
-                          ({donation.distanceKm} km away)
-                        </span>
-                      )}
-                    </p>
-
-                    <p className="ngo-deadline">
-                      Pickup before: {formatDateTime(donation.pickupDeadline)}
-                    </p>
-
-                    {donation.imageAnalysis && (
-                      <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
-                        <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
-                          <span>
-                            <strong>Quality Assessment:</strong> Freshness indicator: {donation.imageAnalysis.freshnessIndicator} | Visual condition: {donation.imageAnalysis.visualCondition}
-                          </span>
-                        </p>
-                      </div>
-                    )}
-
-                    <p className="ngo-packaging">
-                      <strong>Packaging:</strong> {donation.packagingCondition}
-                    </p>
-
-                    <button
-                      className="accept-donation-button"
-                      type="button"
-                      disabled={processingId === donation.id}
-                      onClick={() => handleAcceptDonation(donation.id)}
+                  return (
+                    <article
+                      className="ngo-donation-card"
+                      key={donation.id}
+                      id={`donation-${donation.id}`}
                     >
-                      {processingId === donation.id
-                        ? "Accepting Pickup..."
-                        : "Accept Pickup Request"}
-                    </button>
-                  </article>
-                ))}
+                      <div className="ngo-card-top">
+                        <div>
+                          <h3>{donation.foodName}</h3>
+                          <p>
+                            {donation.category} • {donation.donorOrganisation}
+                          </p>
+                        </div>
+
+                        <span
+                          className={`priority-pill ${getPriorityClass(
+                            donation.priority
+                          )}`}
+                        >
+                          Priority: {donation.priority || "Medium"}
+                        </span>
+                      </div>
+
+                      <DonationImages donation={donation} />
+
+                      {donation.match && (
+                        <div
+                          className="ngo-match-box"
+                          style={{
+                            margin: "10px 0",
+                            background: "#f8fafc",
+                            padding: "10px 12px",
+                            borderRadius: "10px",
+                            border: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              marginBottom: "6px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.85rem",
+                                fontWeight: 600,
+                                color: "#1e293b",
+                              }}
+                            >
+                              Match Score:{" "}
+                              <strong
+                                style={{
+                                  color:
+                                    donation.match.matchPercent >= 80
+                                      ? "#059669"
+                                      : donation.match.matchPercent >= 50
+                                      ? "#d97706"
+                                      : "#dc2626",
+                                }}
+                              >
+                                {donation.match.matchPercent}%
+                              </strong>
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "#64748b",
+                                fontWeight: 500,
+                              }}
+                            >
+                              🚗 {donation.match.distanceKm} km · ~
+                              {donation.match.estimatedTravelMinutes} min drive
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              height: "6px",
+                              width: "100%",
+                              background: "#e2e8f0",
+                              borderRadius: "3px",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: "100%",
+                                width: `${donation.match.matchPercent}%`,
+                                background: donation.match.feasible
+                                  ? donation.match.matchPercent >= 80
+                                    ? "linear-gradient(90deg, #10b981, #059669)"
+                                    : donation.match.matchPercent >= 50
+                                    ? "linear-gradient(90deg, #f59e0b, #d97706)"
+                                    : "#ef4444"
+                                  : "#94a3b8",
+                                borderRadius: "3px",
+                                transition: "width 0.3s ease",
+                              }}
+                            />
+                          </div>
+
+                          {donation.match.feasible === false && (
+                            <div
+                              style={{
+                                marginTop: "6px",
+                                fontSize: "0.78rem",
+                                color: "#b91c1c",
+                                fontWeight: 600,
+                              }}
+                            >
+                              ⚠️ {donation.match.feasibilityReason ||
+                                "Cannot reach before pickup deadline"}
+                            </div>
+                          )}
+
+                          {donation.match.directionsUrl && (
+                            <div style={{ marginTop: "6px", textAlign: "right" }}>
+                              <a
+                                href={donation.match.directionsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontSize: "0.8rem",
+                                  color: "#2563eb",
+                                  textDecoration: "none",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                🗺️ Directions in Google Maps ↗
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="servings-progress-wrapper">
+                        <div className="servings-progress-header">
+                          <span>
+                            <strong>{remaining}</strong> / {total} servings
+                            available
+                          </span>
+                          <span>
+                            {claimed > 0
+                              ? `${claimed} claimed (${percentClaimed}%)`
+                              : "Full quantity"}
+                          </span>
+                        </div>
+                        <div className="servings-progress-track">
+                          <div
+                            className="servings-progress-fill"
+                            style={{ width: `${percentClaimed}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="ngo-donation-details">
+                        <div>
+                          <span>Servings</span>
+                          <strong>
+                            {remaining} of {total} left
+                          </strong>
+                        </div>
+
+                        <div>
+                          <span>Status</span>
+                          <strong
+                            className={
+                              donation.status === "Partially Accepted"
+                                ? "partially-accepted-status"
+                                : "active-status"
+                            }
+                          >
+                            {donation.status}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {donation.foodVerdict && (
+                        <div className="ngo-fssai-pill">
+                          <span>
+                            🛡️ Food Screening:{" "}
+                            <strong>{donation.foodVerdict}</strong> (
+                            {donation.detectedFood || "Food"})
+                          </span>
+                          <small>
+                            {donation.fssaiDisclaimer ||
+                              "Visual screening aligned with FSSAI guidance. Not a lab certification."}
+                          </small>
+                        </div>
+                      )}
+
+                      <p className="ngo-location">
+                        📍 {donation.location}
+                        {donation.distanceKm !== undefined &&
+                          donation.distanceKm !== null && (
+                            <span
+                              style={{
+                                color: "#059669",
+                                fontWeight: "bold",
+                                marginLeft: "6px",
+                              }}
+                            >
+                              ({donation.distanceKm} km away)
+                            </span>
+                          )}
+                      </p>
+
+                      <p className="ngo-deadline">
+                        Pickup before: {formatDateTime(donation.pickupDeadline)}
+                      </p>
+
+                      <p className="ngo-packaging">
+                        <strong>Packaging:</strong> {donation.packagingCondition}
+                      </p>
+
+                      <button
+                        className="accept-donation-button"
+                        type="button"
+                        disabled={processingId === donation.id}
+                        onClick={() => openAcceptModal(donation)}
+                      >
+                        {processingId === donation.id
+                          ? "Processing..."
+                          : "Accept Pickup Request"}
+                      </button>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </article>
@@ -776,117 +1242,375 @@ function NgoDashboard() {
                 </div>
               )}
 
-              {myPickups.map((donation) => (
-                <article className="ngo-donation-card" key={donation.id}>
-                  <div className="ngo-card-top">
-                    <div>
-                      <h3>{donation.foodName}</h3>
-                      <p>{donation.donorOrganisation}</p>
-                    </div>
+              {myPickups.map((item) => {
+                const claimStatus = item.claimStatus || item.status;
+                const statusClass =
+                  claimStatus === "Collected"
+                    ? "collected"
+                    : claimStatus === "Accepted"
+                    ? "accepted"
+                    : "partially-accepted";
 
-                    <span
-                      className={`workflow-status-pill ${donation.status.toLowerCase()}`}
-                    >
-                      {donation.status}
-                    </span>
-                  </div>
+                const targetClaimId = item.claimId;
+                const targetDonationId = item.donationId || item.id;
+                const cardIdentifier = targetClaimId || targetDonationId;
 
-                  <DonationImages donation={donation} />
+                return (
+                  <article
+                    className="ngo-donation-card"
+                    key={cardIdentifier}
+                    id={`pickup-${cardIdentifier}`}
+                  >
+                    <div className="ngo-card-top">
+                      <div>
+                        <h3>{item.foodName}</h3>
+                        <p>{item.donorOrganisation}</p>
+                      </div>
 
-                  <div className="ngo-donation-details">
-                    <div>
-                      <span>Servings</span>
-                      <strong>{donation.servings}</strong>
-                    </div>
-
-                    <div>
-                      <span>AI Priority</span>
-                      <strong>{donation.priority || "Medium"}</strong>
-                    </div>
-                  </div>
-
-                  <p className="ngo-location">
-                    📍 {donation.location}
-                    {donation.distanceKm !== undefined && donation.distanceKm !== null && (
-                      <span style={{ color: '#059669', fontWeight: 'bold', marginLeft: '6px' }}>
-                        ({donation.distanceKm} km away)
+                      <span className={`workflow-status-pill ${statusClass}`}>
+                        {claimStatus}
                       </span>
-                    )}
-                  </p>
-
-                  <p className="ngo-deadline">
-                    Pickup before: {formatDateTime(donation.pickupDeadline)}
-                  </p>
-
-                  <p className="ngo-packaging">
-                    <strong>Packaging:</strong> {donation.packagingCondition}
-                  </p>
-
-                  {donation.imageAnalysis && (
-                    <div style={{ marginTop: '8px', marginBottom: '12px', padding: '10px 14px', background: donation.imageAnalysis.isSpoiled ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${donation.imageAnalysis.isSpoiled ? '#fecaca' : '#bbf7d0'}` }}>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: donation.imageAnalysis.isSpoiled ? '#991b1b' : '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '1.2rem' }}>{donation.imageAnalysis.isSpoiled ? '⚠️' : '📷'}</span>
-                        <span>
-                          <strong>Quality Assessment:</strong> Freshness indicator: {donation.imageAnalysis.freshnessIndicator} | Visual condition: {donation.imageAnalysis.visualCondition}
-                        </span>
-                      </p>
                     </div>
-                  )}
 
-                  {donation.acceptedAt && (
-                    <p className="ngo-deadline">
-                      Accepted: {formatDateTime(donation.acceptedAt)}
-                    </p>
-                  )}
+                    <DonationImages donation={item} />
 
-                  {donation.status === "Accepted" && (
-                    <button
-                      className="complete-pickup-button"
-                      type="button"
-                      disabled={processingId === donation.id}
-                      onClick={() => handleMarkCollected(donation.id)}
-                    >
-                      {processingId === donation.id
-                        ? "Updating..."
-                        : "Mark Collection Completed"}
-                    </button>
-                  )}
+                    <div className="ngo-donation-details">
+                      <div>
+                        <span>Claimed Servings</span>
+                        <strong>
+                          {item.claimedQuantity || item.servings} servings
+                        </strong>
+                      </div>
 
-                  {donation.status === "Collected" && !donation.feedback && (
-                    <div style={{ marginTop: '16px', padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <p style={{ margin: '0 0 10px 0', fontWeight: 'bold' }}>Rate Food Quality:</p>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        {[1, 2, 3, 4, 5].map(star => (
-                          <button
-                            key={star}
-                            onClick={() => handleRateDonation(donation.id, star)}
-                            disabled={processingId === donation.id}
-                            style={{ 
-                              padding: '6px 12px', 
-                              border: '1px solid #cbd5e1', 
-                              borderRadius: '4px',
-                              background: 'white',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {star} ⭐
-                          </button>
-                        ))}
+                      <div>
+                        <span>Priority</span>
+                        <strong>{item.priority || "Medium"}</strong>
                       </div>
                     </div>
-                  )}
-                  {donation.feedback && (
-                    <p style={{ color: '#16a34a', fontWeight: 'bold', marginTop: '12px' }}>
-                      ✓ Rated {donation.feedback.rating} stars
+
+                    <p className="ngo-location">
+                      📍 {item.location}
+                      {item.distanceKm !== undefined && item.distanceKm !== null && (
+                        <span
+                          style={{
+                            color: "#059669",
+                            fontWeight: "bold",
+                            marginLeft: "6px",
+                          }}
+                        >
+                          ({item.distanceKm} km away)
+                        </span>
+                      )}
                     </p>
-                  )}
-                </article>
-              ))}
+
+                    <p className="ngo-deadline">
+                      Pickup before: {formatDateTime(item.pickupDeadline)}
+                    </p>
+
+                    <p className="ngo-packaging">
+                      <strong>Packaging:</strong> {item.packagingCondition}
+                    </p>
+
+                    {item.imageAnalysis && (
+                      <div
+                        style={{
+                          marginTop: "8px",
+                          marginBottom: "12px",
+                          padding: "10px 14px",
+                          background: item.imageAnalysis.isSpoiled
+                            ? "#fef2f2"
+                            : "#f0fdf4",
+                          borderRadius: "8px",
+                          border: `1px solid ${
+                            item.imageAnalysis.isSpoiled ? "#fecaca" : "#bbf7d0"
+                          }`,
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: "0.85rem",
+                            color: item.imageAnalysis.isSpoiled
+                              ? "#991b1b"
+                              : "#166534",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <span style={{ fontSize: "1.2rem" }}>
+                            {item.imageAnalysis.isSpoiled ? "⚠️" : "📷"}
+                          </span>
+                          <span>
+                            <strong>Quality Assessment:</strong> Freshness
+                            indicator: {item.imageAnalysis.freshnessIndicator} |
+                            Visual condition: {item.imageAnalysis.visualCondition}
+                          </span>
+                        </p>
+                      </div>
+                    )}
+
+                    {item.acceptedAt && (
+                      <p className="ngo-deadline">
+                        Accepted: {formatDateTime(item.acceptedAt)}
+                      </p>
+                    )}
+
+                    {claimStatus === "Accepted" && (
+                      <button
+                        className="complete-pickup-button"
+                        type="button"
+                        disabled={processingId === cardIdentifier}
+                        onClick={() =>
+                          handleMarkCollected(targetClaimId, targetDonationId)
+                        }
+                      >
+                        {processingId === cardIdentifier
+                          ? "Updating..."
+                          : "Mark Collection Completed"}
+                      </button>
+                    )}
+
+                    {claimStatus === "Collected" && !item.feedback && (
+                      <div
+                        style={{
+                          marginTop: "16px",
+                          padding: "16px",
+                          background: "#f8fafc",
+                          borderRadius: "8px",
+                          border: "1px solid #e2e8f0",
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: "0 0 10px 0",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          Rate Food Quality:
+                        </p>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              onClick={() =>
+                                handleRateDonation(targetDonationId, star)
+                              }
+                              disabled={processingId === targetDonationId}
+                              style={{
+                                padding: "6px 12px",
+                                border: "1px solid #cbd5e1",
+                                borderRadius: "4px",
+                                background: "white",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {star} ⭐
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {item.feedback && (
+                      <p
+                        style={{
+                          color: "#16a34a",
+                          fontWeight: "bold",
+                          marginTop: "12px",
+                        }}
+                      >
+                        ✓ Rated {item.feedback.rating} stars
+                      </p>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           </article>
         </section>
         )}
       </main>
+
+      {/* Partial Acceptance Modal */}
+      {acceptModal.isOpen && acceptModal.donation && (() => {
+        const donation = acceptModal.donation;
+        const remaining = donation.remainingServings ?? donation.servings;
+        const capacity = ngo?.capacity ? Number(ngo.capacity) : 0;
+        const qty = Number(acceptModal.quantity);
+        const isOverRemaining = qty > remaining;
+        const isOverCapacity = capacity > 0 && qty > capacity;
+        const isUnderMin = qty < 1;
+        const hasError = isOverRemaining || isOverCapacity || isUnderMin;
+
+        return (
+          <div
+            className="accept-modal-overlay"
+            onClick={() => setAcceptModal({ ...acceptModal, isOpen: false })}
+          >
+            <div
+              className="accept-modal-card"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3>Accept Food Pickup</h3>
+              <p className="accept-modal-subtitle">
+                {donation.foodName} • {donation.category}
+              </p>
+
+              <div className="modal-info-box">
+                <div>
+                  <span>Available: </span>
+                  <strong>{remaining} servings</strong>
+                </div>
+                <div>
+                  <span>Your Daily Capacity: </span>
+                  <strong>
+                    {capacity > 0 ? `${capacity} meals/day` : "Unspecified"}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="modal-field">
+                <label htmlFor="servings-to-claim">
+                  Servings to Accept / Claim:
+                </label>
+                <input
+                  id="servings-to-claim"
+                  className="modal-input"
+                  type="number"
+                  min="1"
+                  max={remaining}
+                  value={acceptModal.quantity}
+                  onChange={(e) =>
+                    setAcceptModal({
+                      ...acceptModal,
+                      quantity: e.target.value,
+                    })
+                  }
+                />
+
+                <div className="modal-quick-buttons">
+                  {capacity > 0 && (
+                    <button
+                      type="button"
+                      className="quick-btn"
+                      onClick={() =>
+                        setAcceptModal({
+                          ...acceptModal,
+                          quantity: Math.min(remaining, capacity),
+                        })
+                      }
+                    >
+                      Accept Maximum ({Math.min(remaining, capacity)})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="quick-btn"
+                    disabled={capacity > 0 && remaining > capacity}
+                    title={
+                      capacity > 0 && remaining > capacity
+                        ? "Exceeds your organization's daily capacity limit"
+                        : "Accept all available servings"
+                    }
+                    onClick={() =>
+                      setAcceptModal({
+                        ...acceptModal,
+                        quantity: remaining,
+                      })
+                    }
+                  >
+                    Accept All Remaining ({remaining})
+                  </button>
+                </div>
+
+                {isOverRemaining && (
+                  <p className="modal-warning">
+                    ⚠️ Cannot request more than the {remaining} remaining servings.
+                  </p>
+                )}
+                {isOverCapacity && (
+                  <p className="modal-warning">
+                    ⚠️ Requested quantity exceeds your organization's capacity limit of {capacity} servings.
+                  </p>
+                )}
+                {isUnderMin && (
+                  <p className="modal-warning">
+                    ⚠️ Quantity must be at least 1.
+                  </p>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="modal-cancel-btn"
+                  onClick={() =>
+                    setAcceptModal({ ...acceptModal, isOpen: false })
+                  }
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="modal-submit-btn"
+                  disabled={hasError || processingId === donation.id}
+                  onClick={() => handleAcceptDonation(donation.id, qty)}
+                >
+                  {processingId === donation.id
+                    ? "Confirming..."
+                    : `Confirm Acceptance (${qty} servings)`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {isLocationModalOpen && (
+        <div className="camera-modal-backdrop" onClick={() => setIsLocationModalOpen(false)}>
+          <div className="camera-modal-dialog" style={{ maxWidth: "460px", background: "#fff", padding: "24px", borderRadius: "12px", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 12px 0", color: "#1e293b", fontSize: "1.25rem", fontWeight: 700 }}>Update Organization Location</h3>
+            <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "0.9rem", lineHeight: 1.5 }}>
+              Update your registered address to receive accurate distance calculations, road travel ETAs, and proximity matches.
+            </p>
+            <form onSubmit={handleUpdateLocation}>
+              <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                <input
+                  type="text"
+                  value={newLocationAddress}
+                  onChange={(e) => setNewLocationAddress(e.target.value)}
+                  placeholder="Enter city, neighborhood, or address"
+                  required
+                  style={{ flex: 1, padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "0.9rem" }}
+                />
+                <button
+                  type="button"
+                  onClick={handleGpsDetectLocation}
+                  style={{ background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "0 14px", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, whiteSpace: "nowrap", color: "#0f172a" }}
+                >
+                  📍 Use GPS
+                </button>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => setIsLocationModalOpen(false)}
+                  style={{ background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontWeight: 600, color: "#475569" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingLocation}
+                  style={{ background: "#0284c7", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 18px", cursor: "pointer", fontWeight: 600 }}
+                >
+                  {isUpdatingLocation ? "Saving..." : "Save Location"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

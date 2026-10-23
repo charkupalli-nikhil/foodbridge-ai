@@ -58,6 +58,7 @@ function Register() {
 
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDetectingGps, setIsDetectingGps] = useState(false);
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -95,6 +96,54 @@ function Register() {
             (foodType) => foodType !== value
           ),
     }));
+  };
+
+  const handleGpsDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    setIsDetectingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            {
+              headers: { "User-Agent": "FoodBridgeAI/1.0" },
+            }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.display_name) {
+              setFormData((prev) => ({
+                ...prev,
+                location: data.display_name,
+              }));
+              setIsDetectingGps(false);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn("[Reverse Geocode] error:", e);
+        }
+
+        setFormData((prev) => ({
+          ...prev,
+          location: `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`,
+        }));
+        setIsDetectingGps(false);
+      },
+      (err) => {
+        console.error("GPS detection failed:", err);
+        alert("Could not access GPS location. Please check your browser permissions.");
+        setIsDetectingGps(false);
+      },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
   };
 
   const handleSubmit = async (event) => {
@@ -379,12 +428,30 @@ function Register() {
             )}
 
             <label htmlFor="register-location">
-              {formData.role === "ngo" ? "Operating Location" : "Location / City"}
+              <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>{formData.role === "ngo" ? "Operating Location" : "Location / City"}</span>
+                <button
+                  type="button"
+                  onClick={handleGpsDetectLocation}
+                  disabled={isDetectingGps}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#0284c7",
+                    fontSize: "0.85rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {isDetectingGps ? "📍 Locating..." : "📍 Use GPS"}
+                </button>
+              </span>
               <input
                 id="register-location"
                 name="location"
                 type="text"
-                placeholder="Enter city or operating area"
+                placeholder="Enter city, neighborhood, or operating area"
                 value={formData.location}
                 onChange={handleChange}
                 required
