@@ -1,7 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import "./CameraCaptureModal.css";
 
-export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
+export default function CameraCaptureModal({
+  isOpen,
+  onClose,
+  onCapture,
+  title = "Live Camera Capture",
+  guidelineText = "Center the prepared food clearly under good lighting",
+}) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -156,7 +162,7 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
         <div className="camera-modal-header">
           <div className="camera-modal-title-group">
             <span className="camera-live-pulse" />
-            <h3 id="camera-modal-title">Live Camera Capture</h3>
+            <h3 id="camera-modal-title">{title}</h3>
           </div>
           <button
             type="button"
@@ -185,7 +191,7 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
             <div className="camera-preview-container">
               <img
                 src={previewUrl}
-                alt="Captured food snapshot"
+                alt="Captured snapshot"
                 className="camera-preview-img"
               />
               <div className="camera-preview-badge">Snapshot Ready</div>
@@ -212,7 +218,7 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
                 <div className="crosshair-corner bottom-right" />
               </div>
               <div className="camera-guideline-text">
-                Center the prepared food clearly under good lighting
+                {guidelineText}
               </div>
             </div>
           )}

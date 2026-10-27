@@ -46,6 +46,7 @@ function DonorDashboard() {
 
   // Live camera capture states
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [cameraTarget, setCameraTarget] = useState("food"); // "food" | "packaging"
   const [captureToken, setCaptureToken] = useState("");
   const [captureCoords, setCaptureCoords] = useState({ lat: null, lng: null });
   const [pickupCoords, setPickupCoords] = useState({ lat: null, lng: null });
@@ -119,14 +120,17 @@ function DonorDashboard() {
       [name]: value,
     }));
   };
-  const handleOpenCameraModal = async () => {
-    try {
-      const res = await API.post("/donations/capture-session");
-      if (res.data?.captureToken) {
-        setCaptureToken(res.data.captureToken);
+  const handleOpenCameraModal = async (target = "food") => {
+    setCameraTarget(target);
+    if (target === "food") {
+      try {
+        const res = await API.post("/donations/capture-session");
+        if (res.data?.captureToken) {
+          setCaptureToken(res.data.captureToken);
+        }
+      } catch (err) {
+        console.warn("[Camera Session] Could not obtain capture token:", err);
       }
-    } catch (err) {
-      console.warn("[Camera Session] Could not obtain capture token:", err);
     }
     setIsCameraModalOpen(true);
   };
@@ -200,6 +204,15 @@ function DonorDashboard() {
   };
 
   const handleCameraCaptured = (blob, metadata) => {
+    if (cameraTarget === "packaging") {
+      const file = new File([blob], `live_packaging_capture_${Date.now()}.jpg`, {
+        type: "image/jpeg",
+      });
+      setPackagingImageFile(file);
+      setPackagingImagePreview(URL.createObjectURL(file));
+      return;
+    }
+
     const file = new File([blob], `live_food_capture_${Date.now()}.jpg`, {
       type: "image/jpeg",
     });
@@ -825,14 +838,62 @@ function DonorDashboard() {
                 </label>
 
                 <label>
-                  Packaging Image (Optional)
-                  <input
-                    id="packagingImage"
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handlePackagingImageChange}
-                  />
+                  <span>Packaging Image (Optional)</span>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn-camera-trigger"
+                      onClick={() => handleOpenCameraModal("packaging")}
+                      style={{
+                        background: "#0284c7",
+                        color: "#fff",
+                        border: "none",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        boxShadow: "0 2px 6px rgba(2, 132, 199, 0.3)",
+                      }}
+                    >
+                      📷 Capture Packaging
+                    </button>
+
+                    {import.meta.env.VITE_ALLOW_GALLERY_UPLOAD === "true" && (
+                      <input
+                        id="packagingImage"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handlePackagingImageChange}
+                        style={{ maxWidth: "200px" }}
+                      />
+                    )}
+
+                    {packagingImagePreview && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPackagingImageFile(null);
+                          setPackagingImagePreview("");
+                        }}
+                        style={{
+                          background: "#f1f5f9",
+                          color: "#dc2626",
+                          border: "1px solid #fecaca",
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "0.85rem",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✕ Remove
+                      </button>
+                    )}
+                  </div>
 
                   {packagingImagePreview && (
                     <img
@@ -1038,6 +1099,12 @@ function DonorDashboard() {
         isOpen={isCameraModalOpen}
         onClose={() => setIsCameraModalOpen(false)}
         onCapture={handleCameraCaptured}
+        title={cameraTarget === "packaging" ? "Capture Packaging Photo" : "Capture Live Food Photo"}
+        guidelineText={
+          cameraTarget === "packaging"
+            ? "Position the food container, box, or packaging clearly in the frame"
+            : "Center the prepared food clearly under good lighting"
+        }
       />
     </div>
   );
