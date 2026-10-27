@@ -10,12 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@rolldown/binding-win32-x64-msvc": "^1.2.15",
     "axios": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.16.0",
     "recharts": "^3.10.1"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-linux-x64-gnu": "^1.2.15",
+    "@rolldown/binding-linux-x64-musl": "^1.2.15",
+    "@rolldown/binding-win32-x64-msvc": "^1.2.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
